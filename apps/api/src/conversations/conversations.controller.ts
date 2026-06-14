@@ -186,6 +186,12 @@ export class ConversationsController {
     return this.conversationsService.deferClientDecision(id, req.user?.tenant_id);
   }
 
+  // Inicia conversa do zero com um lead/cliente sem conversa (card "sem conversa").
+  @Post('start-for-lead/:leadId')
+  startForLead(@Param('leadId') leadId: string, @Request() req: any) {
+    return this.conversationsService.startConversationForLead(leadId, req.user?.id, req.user?.tenant_id);
+  }
+
   @Post(':id/mark-read')
   markAsRead(@Param('id') id: string, @Request() req: any) {
     return this.conversationsService.markAsRead(id, req.user?.id);

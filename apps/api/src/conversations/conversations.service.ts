@@ -22,6 +22,79 @@ export class ConversationsService {
     return this.prisma.conversation.create({ data });
   }
 
+  /**
+   * Inicia uma conversa do zero com um lead/cliente sem conversa (clique no card
+   * "sem conversa" da caixa Clientes). Idempotente: se já há conversa ABERTA,
+   * devolve ela. Resolve a instância (número WhatsApp) do escritório pelo tenant;
+   * atribui ao operador + IA desligada (ele conduz a 1ª mensagem). Outbound-first
+   * é suportado pela Evolution (sendText não exige conversa inbound anterior).
+   */
+  async startConversationForLead(leadId: string, userId: string | undefined, tenantId: string | undefined) {
+    if (!tenantId) throw new BadRequestException('Tenant não identificado.');
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { id: true, phone: true, tenant_id: true },
+    });
+    if (!lead) throw new NotFoundException('Contato não encontrado.');
+    if (lead.tenant_id && lead.tenant_id !== tenantId) throw new ForbiddenException('Contato de outro escritório.');
+    if (!lead.phone) throw new BadRequestException('Contato sem telefone — não dá pra iniciar conversa.');
+
+    // Idempotente: reaproveita QUALQUER conversa existente do lead (reabre a mais
+    // recente se estiver fechada/adiada) — evita criar uma 2ª conversa pro mesmo
+    // contato.
+    const existing = await this.prisma.conversation.findFirst({
+      where: { lead_id: leadId },
+      orderBy: { last_message_at: 'desc' },
+      select: { id: true, status: true },
+    });
+    if (existing) {
+      if (existing.status !== 'ABERTO') {
+        await this.prisma.conversation.update({
+          where: { id: existing.id },
+          data: {
+            status: 'ABERTO',
+            ai_mode: false,
+            ai_mode_disabled_at: new Date(),
+            ai_mode_source: 'MANUAL',
+            last_message_at: new Date(),
+            ...(userId ? { assigned_user_id: userId } : {}),
+          } as any,
+        });
+        this.chatGateway.emitConversationsUpdate(tenantId);
+      }
+      return { id: existing.id, created: false };
+    }
+
+    // Resolve a instância (número) do escritório — única na maioria dos casos;
+    // pega a primeira do tenant, com fallback pra env.
+    const inst = await (this.prisma as any).instance.findFirst({
+      where: { tenant_id: tenantId, type: 'whatsapp' },
+      orderBy: { created_at: 'asc' },
+      select: { name: true, inbox_id: true },
+    });
+    const instanceName = inst?.name || process.env.EVOLUTION_INSTANCE_NAME || null;
+    if (!instanceName) throw new BadRequestException('Escritório sem número de WhatsApp conectado — conecte um número antes de iniciar conversas.');
+
+    const conv = await this.prisma.conversation.create({
+      data: {
+        lead_id: leadId,
+        channel: 'whatsapp',
+        external_id: `${lead.phone}@s.whatsapp.net`,
+        inbox_id: inst?.inbox_id ?? null,
+        instance_name: instanceName,
+        status: 'ABERTO',
+        ai_mode: false,
+        ai_mode_disabled_at: new Date(),
+        ai_mode_source: 'MANUAL',
+        assigned_user_id: userId ?? null,
+        last_message_at: new Date(),
+        tenant_id: tenantId,
+      } as any,
+    });
+    this.chatGateway.emitConversationsUpdate(tenantId);
+    return { id: conv.id, created: true };
+  }
+
   async findAll(status?: string, userId?: string, inboxId?: string, tenantId?: string, clientMode?: boolean) {
     const where: any = {};
     // Filtro por status explícito (se passado via query param)
@@ -246,7 +319,84 @@ export class ConversationsService {
       };
     });
 
-    return { data, total };
+    // ── Clientes SEM conversa (caixa Clientes) ────────────────────────────
+    // Cliente ativo cadastrado por outra via (presencial/processo) que nunca teve
+    // conversa de WhatsApp não aparecia no chat (que é por conversa). Anexamos
+    // como pseudo-entradas (status 'SEM_CONVERSA', id 'lead:'+leadId) pra o "Tudo"
+    // mostrar o TOTAL de clientes; clicar no card inicia a conversa. Só na caixa
+    // Clientes e sem inbox filtrado; respeita o mesmo recorte por papel do findAll.
+    let semConvCount = 0;
+    if (clientMode === true && !inboxId) {
+      const semConvWhere: any = {
+        is_client: true,
+        stage: { notIn: ['ENCERRADO', 'PERDIDO'] },
+        ...(tenantId ? { tenant_id: tenantId } : {}),
+        conversations: { none: {} }, // SEM nenhuma conversa (zero) — evita dupla listagem com a conversa fechada/adiada (que já vem no findAll)
+      };
+      if (!isAdminUser) {
+        const leadOr: any[] = [];
+        if (isAdvogadoUser) leadOr.push({ legal_cases: { some: { lawyer_id: userId } } });
+        if (isOperadorUser) leadOr.push({ cs_user_id: userId });
+        semConvWhere.OR = leadOr.length > 0 ? leadOr : [{ id: '__none__' }];
+      }
+      const semConv = await this.prisma.lead.findMany({
+        where: semConvWhere,
+        select: {
+          id: true, name: true, phone: true, email: true, stage: true, stage_entered_at: true,
+          tags: true, is_client: true, became_client_at: true, profile_picture_url: true,
+          process_decision_snoozed_until: true,
+          legal_cases: { select: { archived: true } },
+        } as any,
+      });
+      const agoraSem = Date.now();
+      for (const l of semConv as any[]) {
+        const lc = l.legal_cases ?? [];
+        const jaTeve = lc.length > 0;
+        const temAtivo = lc.some((x: any) => !x.archived);
+        const becameMs = l.became_client_at ? new Date(l.became_client_at).getTime() : null;
+        const snoozeMs = l.process_decision_snoozed_until ? new Date(l.process_decision_snoozed_until).getTime() : 0;
+        const gracaOk = jaTeve ? true : (becameMs ? agoraSem >= becameMs + 7 * 24 * 60 * 60 * 1000 : true);
+        data.push({
+          id: `lead:${l.id}`,
+          leadId: l.id,
+          inboxId: null,
+          contactName: l.name || l.phone || 'Desconhecido',
+          contactPhone: l.phone || '',
+          contactEmail: l.email || '',
+          channel: 'WHATSAPP',
+          status: 'SEM_CONVERSA',
+          lastMessage: '',
+          lastMessageDirection: null,
+          lastMessageType: null,
+          lastMessageAt: l.became_client_at?.toISOString() || l.stage_entered_at?.toISOString() || '',
+          assignedAgentId: null,
+          assignedAgentName: null,
+          aiMode: false,
+          profile_picture_url: l.profile_picture_url || null,
+          legalArea: null,
+          assignedLawyerId: null,
+          assignedLawyerName: null,
+          originAssignedUserId: null,
+          originAssignedUserName: null,
+          pendingTransferToId: null,
+          pendingTransferToName: null,
+          leadStage: l.stage || null,
+          leadTags: l.tags || [],
+          stageEnteredAt: l.stage_entered_at?.toISOString() || null,
+          isClient: true,
+          becameClientAt: l.became_client_at?.toISOString() || null,
+          semProcesso: !temAtivo && gracaOk && snoozeMs <= agoraSem,
+          retornou: jaTeve && !temAtivo,
+          nextStep: null,
+          activeTask: null,
+          taskCount: 0,
+          hasNotes: false,
+        } as any);
+      }
+      semConvCount = semConv.length;
+    }
+
+    return { data, total: total + semConvCount };
   }
 
   async findOne(id: string, tenantId?: string) {
