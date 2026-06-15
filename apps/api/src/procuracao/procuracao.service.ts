@@ -18,6 +18,29 @@ function resolveMargins(stored: ProcMargins | null | undefined): ProcMargins {
     && stored.left === LEGACY_MARGINS.left && stored.right === LEGACY_MARGINS.right) return DEFAULT_MARGINS;
   return stored;
 }
+// ── Tipografia configurável por escritório ───────────────────────────────────
+export interface ProcStyle {
+  font: 'times' | 'helvetica';
+  size: number;        // pt
+  lineSpacing: number; // entrelinha (1.15 compacto … 2 duplo); padrão ~1.34
+  justify: boolean;    // corpo justificado (true) ou à esquerda (false)
+  autoFit: boolean;    // reduzir a fonte p/ caber em 1 página
+}
+const DEFAULT_STYLE: ProcStyle = { font: 'times', size: 12, lineSpacing: 1.34, justify: true, autoFit: true };
+function resolveStyle(stored: any): ProcStyle {
+  const s = (stored ?? {}) as Partial<ProcStyle>;
+  return {
+    font: s.font === 'helvetica' ? 'helvetica' : 'times',
+    size: typeof s.size === 'number' && s.size >= 6 && s.size <= 24 ? s.size : DEFAULT_STYLE.size,
+    lineSpacing: typeof s.lineSpacing === 'number' && s.lineSpacing >= 1 && s.lineSpacing <= 3 ? s.lineSpacing : DEFAULT_STYLE.lineSpacing,
+    justify: s.justify === undefined ? true : !!s.justify,
+    autoFit: s.autoFit === undefined ? true : !!s.autoFit,
+  };
+}
+const FONT_OF: Record<ProcStyle['font'], StandardFonts> = {
+  times: StandardFonts.TimesRoman,
+  helvetica: StandardFonts.Helvetica,
+};
 const A4: [number, number] = [595.28, 841.89];
 const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
 
@@ -45,17 +68,16 @@ function fmtCep(v?: string | null): string {
 // Replica a formatação do modelo do escritório: corpo JUSTIFICADO, título/data/
 // assinatura (linha curta isolada) CENTRALIZADOS, espaço entre parágrafos e
 // linhas em branco do texto viram espaço vertical.
-const LINE_RATIO = 1.34;       // entrelinha (≈ modelo: 16pt p/ fonte 12)
 const PARA_GAP_RATIO = 0.55;   // folga extra após cada parágrafo
 const CENTER_MAX_RATIO = 0.72; // linha única mais curta que isto → centraliza
 
 type LayoutItem = { words: string[]; align: 'justify' | 'left' | 'center'; dy: number };
 interface Layout { items: LayoutItem[]; height: number; wordW: (w: string) => number; space: number }
 
-function layoutText(text: string, font: PDFFont, size: number, maxWidth: number): Layout {
+function layoutText(text: string, font: PDFFont, size: number, maxWidth: number, lineRatio: number, justify: boolean): Layout {
   const wordW = (w: string) => font.widthOfTextAtSize(w, size);
   const space = font.widthOfTextAtSize(' ', size);
-  const lineHeight = size * LINE_RATIO;
+  const lineHeight = size * lineRatio;
   const paraGap = lineHeight * PARA_GAP_RATIO;
   const natW = (ws: string[]) => ws.reduce((s, w) => s + wordW(w), 0) + Math.max(0, ws.length - 1) * space;
   const items: LayoutItem[] = [];
@@ -76,7 +98,8 @@ function layoutText(text: string, font: PDFFont, size: number, maxWidth: number)
     const centered = wlines.length === 1 && natW(wlines[0]) <= maxWidth * CENTER_MAX_RATIO;
     for (let li = 0; li < wlines.length; li++) {
       const last = li === wlines.length - 1;
-      items.push({ words: wlines[li], align: centered ? 'center' : last ? 'left' : 'justify', dy: off });
+      const align = centered ? 'center' : justify && !last ? 'justify' : 'left';
+      items.push({ words: wlines[li], align, dy: off });
       off += lineHeight;
     }
     off += paraGap; // espaço entre parágrafos
@@ -111,21 +134,23 @@ export class ProcuracaoService {
   async getConfig(tenantId: string) {
     const t = await this.prisma.tenant.findUnique({
       where: { id: tenantId },
-      select: { procuracao_template: true, procuracao_letterhead_key: true, procuracao_margins: true },
+      select: { procuracao_template: true, procuracao_letterhead_key: true, procuracao_margins: true, procuracao_style: true },
     });
     return {
       template: t?.procuracao_template ?? '',
       hasLetterhead: !!t?.procuracao_letterhead_key,
       margins: resolveMargins(t?.procuracao_margins as any),
+      style: resolveStyle(t?.procuracao_style as any),
     };
   }
 
-  async saveConfig(tenantId: string, input: { template?: string; margins?: ProcMargins }) {
+  async saveConfig(tenantId: string, input: { template?: string; margins?: ProcMargins; style?: { font?: string; size?: number; lineSpacing?: number; justify?: boolean; autoFit?: boolean } }) {
     await this.prisma.tenant.update({
       where: { id: tenantId },
       data: {
         ...(input.template !== undefined ? { procuracao_template: input.template } : {}),
         ...(input.margins ? { procuracao_margins: input.margins as any } : {}),
+        ...(input.style ? { procuracao_style: resolveStyle(input.style) as any } : {}),
       },
     });
     return { ok: true };
@@ -206,7 +231,7 @@ export class ProcuracaoService {
   async generatePdf(leadId: string, tenantId: string): Promise<{ buffer: Buffer; nome: string }> {
     const t = await this.prisma.tenant.findUnique({
       where: { id: tenantId },
-      select: { procuracao_template: true, procuracao_letterhead_key: true, procuracao_margins: true },
+      select: { procuracao_template: true, procuracao_letterhead_key: true, procuracao_margins: true, procuracao_style: true },
     });
     if (!t?.procuracao_template) {
       throw new BadRequestException('Configure o texto da procuração em Configurações → Procuração.');
@@ -214,6 +239,7 @@ export class ProcuracaoService {
     const { vars } = await this.buildVars(leadId, tenantId);
     const { text } = this.fill(t.procuracao_template, vars);
     const margins = resolveMargins(t.procuracao_margins as any);
+    const style = resolveStyle(t.procuracao_style as any);
 
     let pdf: PDFDocument;
     let page: PDFPage;
@@ -240,15 +266,18 @@ export class ProcuracaoService {
       page = pdf.addPage(A4);
     }
 
-    const font = await pdf.embedFont(StandardFonts.TimesRoman);
+    const font = await pdf.embedFont(FONT_OF[style.font]);
     const { width, height } = page.getSize();
     const maxWidth = width - margins.left - margins.right;
     const usableHeight = Math.max(0, height - margins.top - margins.bottom);
-    // Fonte 12pt; só reduz (até 8pt) se o texto não couber em 1 página —
-    // pdf-lib não pagina, então isto evita perder a parte de baixo sem aviso.
-    let size = 12;
-    let L = layoutText(text, font, size, maxWidth);
-    while (L.height > usableHeight && size > 8) { size -= 0.5; L = layoutText(text, font, size, maxWidth); }
+    // Usa o tamanho configurado; se autoFit, reduz (até 8pt) p/ caber em 1
+    // página — pdf-lib não pagina, então evita perder a parte de baixo sem aviso.
+    let size = style.size;
+    let L = layoutText(text, font, size, maxWidth, style.lineSpacing, style.justify);
+    while (style.autoFit && L.height > usableHeight && size > 8) {
+      size -= 0.5;
+      L = layoutText(text, font, size, maxWidth, style.lineSpacing, style.justify);
+    }
     drawLayout(page, L, font, size, rgb(0.1, 0.1, 0.12), margins.left, height - margins.top, maxWidth);
 
     const buffer = Buffer.from(await pdf.save());
