@@ -37,9 +37,13 @@ function resolveStyle(stored: any): ProcStyle {
     autoFit: s.autoFit === undefined ? true : !!s.autoFit,
   };
 }
-const FONT_OF: Record<ProcStyle['font'], StandardFonts> = {
+const FONT_REGULAR: Record<ProcStyle['font'], StandardFonts> = {
   times: StandardFonts.TimesRoman,
   helvetica: StandardFonts.Helvetica,
+};
+const FONT_BOLD: Record<ProcStyle['font'], StandardFonts> = {
+  times: StandardFonts.TimesRomanBold,
+  helvetica: StandardFonts.HelveticaBold,
 };
 const A4: [number, number] = [595.28, 841.89];
 const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
@@ -71,25 +75,39 @@ function fmtCep(v?: string | null): string {
 const PARA_GAP_RATIO = 0.55;   // folga extra após cada parágrafo
 const CENTER_MAX_RATIO = 0.72; // linha única mais curta que isto → centraliza
 
-type LayoutItem = { words: string[]; align: 'justify' | 'left' | 'center'; dy: number };
-interface Layout { items: LayoutItem[]; height: number; wordW: (w: string) => number; space: number }
+// Palavra com marca de negrito (texto entre **...** vira negrito).
+type Word = { t: string; b: boolean };
+type LayoutItem = { words: Word[]; align: 'justify' | 'left' | 'center'; dy: number };
+interface Layout { items: LayoutItem[]; height: number; space: number }
 
-function layoutText(text: string, font: PDFFont, size: number, maxWidth: number, lineRatio: number, justify: boolean): Layout {
-  const wordW = (w: string) => font.widthOfTextAtSize(w, size);
-  const space = font.widthOfTextAtSize(' ', size);
+// Quebra uma linha em palavras, alternando negrito a cada par de "**".
+function parseWords(line: string): Word[] {
+  const out: Word[] = [];
+  const parts = line.split('**');
+  for (let i = 0; i < parts.length; i++) {
+    if (!parts[i]) continue;
+    const bold = i % 2 === 1; // trechos ímpares estão entre ** **
+    for (const t of parts[i].split(/\s+/)) if (t) out.push({ t, b: bold });
+  }
+  return out;
+}
+
+function layoutText(text: string, regular: PDFFont, bold: PDFFont, size: number, maxWidth: number, lineRatio: number, justify: boolean): Layout {
+  const wW = (w: Word) => (w.b ? bold : regular).widthOfTextAtSize(w.t, size);
+  const space = regular.widthOfTextAtSize(' ', size);
   const lineHeight = size * lineRatio;
   const paraGap = lineHeight * PARA_GAP_RATIO;
-  const natW = (ws: string[]) => ws.reduce((s, w) => s + wordW(w), 0) + Math.max(0, ws.length - 1) * space;
+  const natW = (ws: Word[]) => ws.reduce((s, w) => s + wW(w), 0) + Math.max(0, ws.length - 1) * space;
   const items: LayoutItem[] = [];
   let off = 0;
   for (const raw of (text || '').replace(/\r/g, '').split('\n')) {
-    if (raw.trim() === '') { off += lineHeight; continue; } // linha em branco = espaço
-    const words = raw.trim().split(/\s+/);
+    const words = raw.trim() === '' ? [] : parseWords(raw);
+    if (!words.length) { off += lineHeight; continue; } // linha em branco = espaço
     // quebra gulosa por largura
-    const wlines: string[][] = [];
-    let cur: string[] = [], curW = 0;
+    const wlines: Word[][] = [];
+    let cur: Word[] = [], curW = 0;
     for (const w of words) {
-      const ww = wordW(w);
+      const ww = wW(w);
       if (!cur.length) { cur = [w]; curW = ww; }
       else if (curW + space + ww <= maxWidth) { cur.push(w); curW += space + ww; }
       else { wlines.push(cur); cur = [w]; curW = ww; }
@@ -104,24 +122,28 @@ function layoutText(text: string, font: PDFFont, size: number, maxWidth: number,
     }
     off += paraGap; // espaço entre parágrafos
   }
-  return { items, height: off, wordW, space };
+  return { items, height: off, space };
 }
 
-function drawLayout(page: PDFPage, L: Layout, font: PDFFont, size: number, color: ReturnType<typeof rgb>, leftX: number, topY: number, maxWidth: number) {
+// Desenha palavra a palavra (cada uma na sua fonte: regular ou negrito).
+function drawLayout(page: PDFPage, L: Layout, regular: PDFFont, bold: PDFFont, size: number, color: ReturnType<typeof rgb>, leftX: number, topY: number, maxWidth: number) {
+  const fontOf = (w: Word) => (w.b ? bold : regular);
+  const wW = (w: Word) => fontOf(w).widthOfTextAtSize(w.t, size);
   for (const it of L.items) {
     const y = topY - it.dy;
-    const sumW = it.words.reduce((s, w) => s + L.wordW(w), 0);
+    const sumW = it.words.reduce((s, w) => s + wW(w), 0);
+    let x = leftX;
+    let gap = L.space;
     if (it.align === 'justify' && it.words.length > 1) {
-      const gap = (maxWidth - sumW) / (it.words.length - 1);
-      if (gap > 0) {
-        let x = leftX;
-        for (const w of it.words) { page.drawText(w, { x, y, size, font, color }); x += L.wordW(w) + gap; }
-        continue;
-      }
+      const g = (maxWidth - sumW) / (it.words.length - 1);
+      if (g > 0) gap = g;
+    } else if (it.align === 'center') {
+      x = leftX + (maxWidth - (sumW + Math.max(0, it.words.length - 1) * L.space)) / 2;
     }
-    const text = it.words.join(' ');
-    const x = it.align === 'center' ? leftX + (maxWidth - (sumW + Math.max(0, it.words.length - 1) * L.space)) / 2 : leftX;
-    page.drawText(text, { x, y, size, font, color });
+    for (const w of it.words) {
+      page.drawText(w.t, { x, y, size, font: fontOf(w), color });
+      x += wW(w) + gap;
+    }
   }
 }
 
@@ -254,19 +276,20 @@ export class ProcuracaoService {
       page = pdf.addPage(A4);
     }
 
-    const font = await pdf.embedFont(FONT_OF[o.style.font]);
+    const regular = await pdf.embedFont(FONT_REGULAR[o.style.font]);
+    const bold = await pdf.embedFont(FONT_BOLD[o.style.font]);
     const { width, height } = page.getSize();
     const maxWidth = width - o.margins.left - o.margins.right;
     const usableHeight = Math.max(0, height - o.margins.top - o.margins.bottom);
     // Usa o tamanho configurado; se autoFit, reduz (até 8pt) p/ caber em 1
     // página — pdf-lib não pagina, então evita perder a parte de baixo sem aviso.
     let size = o.style.size;
-    let L = layoutText(o.text, font, size, maxWidth, o.style.lineSpacing, o.style.justify);
+    let L = layoutText(o.text, regular, bold, size, maxWidth, o.style.lineSpacing, o.style.justify);
     while (o.style.autoFit && L.height > usableHeight && size > 8) {
       size -= 0.5;
-      L = layoutText(o.text, font, size, maxWidth, o.style.lineSpacing, o.style.justify);
+      L = layoutText(o.text, regular, bold, size, maxWidth, o.style.lineSpacing, o.style.justify);
     }
-    drawLayout(page, L, font, size, rgb(0.1, 0.1, 0.12), o.margins.left, height - o.margins.top, maxWidth);
+    drawLayout(page, L, regular, bold, size, rgb(0.1, 0.1, 0.12), o.margins.left, height - o.margins.top, maxWidth);
     return Buffer.from(await pdf.save());
   }
 
