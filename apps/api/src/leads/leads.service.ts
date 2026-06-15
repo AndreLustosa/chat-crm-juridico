@@ -528,7 +528,18 @@ export class LeadsService {
     };
   }
 
-  async update(id: string, data: { name?: string; email?: string; cpf_cnpj?: string; tags?: string[] }, tenantId?: string, actorUserId?: string): Promise<Lead> {
+  async update(
+    id: string,
+    data: {
+      name?: string; email?: string; cpf_cnpj?: string; tags?: string[];
+      full_name?: string; nationality?: string; marital_status?: string; profession?: string;
+      rg?: string; rg_issuer?: string;
+      address_cep?: string; address_street?: string; address_number?: string;
+      address_complement?: string; address_neighborhood?: string; address_city?: string; address_state?: string;
+    },
+    tenantId?: string,
+    actorUserId?: string,
+  ): Promise<Lead> {
     // Bug fix 2026-05-12 (Leads PR1 #C1)
     if (!tenantId) {
       throw new BadRequestException('tenant_id obrigatorio em update');
@@ -578,6 +589,15 @@ export class LeadsService {
         throw new BadRequestException('Maximo 30 tags por lead');
       }
       sanitized.tags = data.tags.map(t => String(t).slice(0, 60)).filter(t => t.length > 0);
+    }
+
+    // Qualificação (procuração/contrato): texto livre — trim + cap; vazio → null.
+    const QUALI_TEXT = ['full_name', 'nationality', 'marital_status', 'profession', 'rg', 'rg_issuer', 'address_cep', 'address_street', 'address_number', 'address_complement', 'address_neighborhood', 'address_city', 'address_state'] as const;
+    for (const f of QUALI_TEXT) {
+      if ((data as any)[f] !== undefined) {
+        const v = String((data as any)[f] ?? '').trim().slice(0, 200);
+        sanitized[f] = v.length ? v : null;
+      }
     }
 
     const result = await this.prisma.lead.updateMany({

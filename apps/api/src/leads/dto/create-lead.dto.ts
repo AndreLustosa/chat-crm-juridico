@@ -52,6 +52,21 @@ export class UpdateLeadDto {
   @IsArray()
   @IsString({ each: true })
   tags?: string[];
+
+  // ─── Qualificação (procuração/contrato) — todos opcionais ───
+  @IsOptional() @IsString() full_name?: string;
+  @IsOptional() @IsString() nationality?: string;
+  @IsOptional() @IsString() marital_status?: string;
+  @IsOptional() @IsString() profession?: string;
+  @IsOptional() @IsString() rg?: string;
+  @IsOptional() @IsString() rg_issuer?: string;
+  @IsOptional() @IsString() address_cep?: string;
+  @IsOptional() @IsString() address_street?: string;
+  @IsOptional() @IsString() address_number?: string;
+  @IsOptional() @IsString() address_complement?: string;
+  @IsOptional() @IsString() address_neighborhood?: string;
+  @IsOptional() @IsString() address_city?: string;
+  @IsOptional() @IsString() address_state?: string;
 }
 
 export class UpdateLeadStageDto {

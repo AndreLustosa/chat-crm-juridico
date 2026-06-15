@@ -333,6 +333,22 @@ model Lead {
   lead_form_submissions     TrafficLeadFormSubmission[]
   cpf_cnpj                  String? // CPF ou CNPJ — facilita match com Asaas
 
+  // ─── Qualificação do cliente (procuração / contrato) ───────────────
+  // Nome completo (civil) — distinto de `name` (que pode ser informal/WhatsApp).
+  full_name              String?
+  nationality            String? // nacionalidade
+  marital_status         String? // estado civil
+  profession             String? // profissão
+  rg                     String? // RG
+  rg_issuer              String? // órgão emissor do RG (ex.: SSP/AL)
+  address_cep            String?
+  address_street         String? // logradouro
+  address_number         String?
+  address_complement     String?
+  address_neighborhood   String? // bairro
+  address_city           String?
+  address_state          String? // UF
+
   @@unique([tenant_id, phone])
   @@index([phone])
   @@index([stage])
