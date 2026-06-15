@@ -6,7 +6,18 @@ import { Readable } from 'stream';
 
 // Área do texto sobre o timbrado (em pt; origem do PDF é embaixo-à-esquerda).
 export interface ProcMargins { top: number; bottom: number; left: number; right: number }
-const DEFAULT_MARGINS: ProcMargins = { top: 200, bottom: 110, left: 70, right: 70 };
+// Padrão calibrado pelo modelo do escritório: corpo justificado, margens ~85,
+// texto começando ~96pt abaixo do topo (logo abaixo do cabeçalho do timbrado).
+const DEFAULT_MARGINS: ProcMargins = { top: 96, bottom: 56, left: 85, right: 85 };
+// Default ANTIGO (antes da calibração) — tratado como "não personalizado" e
+// migrado para o novo padrão, pra quem já salvou config não ficar com o layout ruim.
+const LEGACY_MARGINS: ProcMargins = { top: 200, bottom: 110, left: 70, right: 70 };
+function resolveMargins(stored: ProcMargins | null | undefined): ProcMargins {
+  if (!stored) return DEFAULT_MARGINS;
+  if (stored.top === LEGACY_MARGINS.top && stored.bottom === LEGACY_MARGINS.bottom
+    && stored.left === LEGACY_MARGINS.left && stored.right === LEGACY_MARGINS.right) return DEFAULT_MARGINS;
+  return stored;
+}
 const A4: [number, number] = [595.28, 841.89];
 const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
 
@@ -30,22 +41,65 @@ function fmtCep(v?: string | null): string {
   const d = v.replace(/\D/g, '');
   return d.length === 8 ? `${d.slice(0, 5)}-${d.slice(5)}` : v;
 }
-// Conta as linhas após a quebra por palavra (mesma lógica do pdf-lib drawText
-// com maxWidth) — usado p/ reduzir a fonte e o texto caber em 1 página, sem
-// perder a linha de assinatura num texto longo (pdf-lib não pagina sozinho).
-function countWrappedLines(text: string, font: PDFFont, size: number, maxWidth: number): number {
-  let lines = 0;
-  for (const para of (text || '').split('\n')) {
-    if (para.length === 0) { lines += 1; continue; }
-    let cur = '';
-    for (const word of para.split(' ')) {
-      const trial = cur ? `${cur} ${word}` : word;
-      if (!cur || font.widthOfTextAtSize(trial, size) <= maxWidth) cur = trial;
-      else { lines += 1; cur = word; }
+// ── Mini-motor de layout (pdf-lib só desenha à esquerda) ──────────────────────
+// Replica a formatação do modelo do escritório: corpo JUSTIFICADO, título/data/
+// assinatura (linha curta isolada) CENTRALIZADOS, espaço entre parágrafos e
+// linhas em branco do texto viram espaço vertical.
+const LINE_RATIO = 1.34;       // entrelinha (≈ modelo: 16pt p/ fonte 12)
+const PARA_GAP_RATIO = 0.55;   // folga extra após cada parágrafo
+const CENTER_MAX_RATIO = 0.72; // linha única mais curta que isto → centraliza
+
+type LayoutItem = { words: string[]; align: 'justify' | 'left' | 'center'; dy: number };
+interface Layout { items: LayoutItem[]; height: number; wordW: (w: string) => number; space: number }
+
+function layoutText(text: string, font: PDFFont, size: number, maxWidth: number): Layout {
+  const wordW = (w: string) => font.widthOfTextAtSize(w, size);
+  const space = font.widthOfTextAtSize(' ', size);
+  const lineHeight = size * LINE_RATIO;
+  const paraGap = lineHeight * PARA_GAP_RATIO;
+  const natW = (ws: string[]) => ws.reduce((s, w) => s + wordW(w), 0) + Math.max(0, ws.length - 1) * space;
+  const items: LayoutItem[] = [];
+  let off = 0;
+  for (const raw of (text || '').replace(/\r/g, '').split('\n')) {
+    if (raw.trim() === '') { off += lineHeight; continue; } // linha em branco = espaço
+    const words = raw.trim().split(/\s+/);
+    // quebra gulosa por largura
+    const wlines: string[][] = [];
+    let cur: string[] = [], curW = 0;
+    for (const w of words) {
+      const ww = wordW(w);
+      if (!cur.length) { cur = [w]; curW = ww; }
+      else if (curW + space + ww <= maxWidth) { cur.push(w); curW += space + ww; }
+      else { wlines.push(cur); cur = [w]; curW = ww; }
     }
-    lines += 1;
+    if (cur.length) wlines.push(cur);
+    const centered = wlines.length === 1 && natW(wlines[0]) <= maxWidth * CENTER_MAX_RATIO;
+    for (let li = 0; li < wlines.length; li++) {
+      const last = li === wlines.length - 1;
+      items.push({ words: wlines[li], align: centered ? 'center' : last ? 'left' : 'justify', dy: off });
+      off += lineHeight;
+    }
+    off += paraGap; // espaço entre parágrafos
   }
-  return lines;
+  return { items, height: off, wordW, space };
+}
+
+function drawLayout(page: PDFPage, L: Layout, font: PDFFont, size: number, color: ReturnType<typeof rgb>, leftX: number, topY: number, maxWidth: number) {
+  for (const it of L.items) {
+    const y = topY - it.dy;
+    const sumW = it.words.reduce((s, w) => s + L.wordW(w), 0);
+    if (it.align === 'justify' && it.words.length > 1) {
+      const gap = (maxWidth - sumW) / (it.words.length - 1);
+      if (gap > 0) {
+        let x = leftX;
+        for (const w of it.words) { page.drawText(w, { x, y, size, font, color }); x += L.wordW(w) + gap; }
+        continue;
+      }
+    }
+    const text = it.words.join(' ');
+    const x = it.align === 'center' ? leftX + (maxWidth - (sumW + Math.max(0, it.words.length - 1) * L.space)) / 2 : leftX;
+    page.drawText(text, { x, y, size, font, color });
+  }
 }
 
 @Injectable()
@@ -62,7 +116,7 @@ export class ProcuracaoService {
     return {
       template: t?.procuracao_template ?? '',
       hasLetterhead: !!t?.procuracao_letterhead_key,
-      margins: ((t?.procuracao_margins as any) ?? DEFAULT_MARGINS) as ProcMargins,
+      margins: resolveMargins(t?.procuracao_margins as any),
     };
   }
 
@@ -159,7 +213,7 @@ export class ProcuracaoService {
     }
     const { vars } = await this.buildVars(leadId, tenantId);
     const { text } = this.fill(t.procuracao_template, vars);
-    const margins = ((t.procuracao_margins as any) ?? DEFAULT_MARGINS) as ProcMargins;
+    const margins = resolveMargins(t.procuracao_margins as any);
 
     let pdf: PDFDocument;
     let page: PDFPage;
@@ -190,25 +244,17 @@ export class ProcuracaoService {
     const { width, height } = page.getSize();
     const maxWidth = width - margins.left - margins.right;
     const usableHeight = Math.max(0, height - margins.top - margins.bottom);
-    // Reduz a fonte de 12→8pt até o texto caber na altura útil (a procuração é
-    // de 1 página); evita que um texto longo perca a parte de baixo sem aviso.
+    // Fonte 12pt; só reduz (até 8pt) se o texto não couber em 1 página —
+    // pdf-lib não pagina, então isto evita perder a parte de baixo sem aviso.
     let size = 12;
-    for (let s = 12; s >= 8; s -= 0.5) {
-      size = s;
-      if (countWrappedLines(text, font, s, maxWidth) * s * 1.5 <= usableHeight) break;
-    }
-    page.drawText(text, {
-      x: margins.left,
-      y: height - margins.top,
-      size,
-      font,
-      color: rgb(0.1, 0.1, 0.12),
-      lineHeight: size * 1.5,
-      maxWidth,
-    });
+    let L = layoutText(text, font, size, maxWidth);
+    while (L.height > usableHeight && size > 8) { size -= 0.5; L = layoutText(text, font, size, maxWidth); }
+    drawLayout(page, L, font, size, rgb(0.1, 0.1, 0.12), margins.left, height - margins.top, maxWidth);
 
     const buffer = Buffer.from(await pdf.save());
-    const primeiro = (vars.nome_completo || 'cliente').split(' ')[0].replace(/[^\p{L}\p{N}]/gu, '') || 'cliente';
+    // Nome do arquivo sem acento (cabeçalho HTTP não lida bem com UTF-8 cru).
+    const primeiro = (vars.nome_completo || 'cliente').split(' ')[0]
+      .normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]/g, '') || 'cliente';
     return { buffer, nome: `Procuracao_${primeiro}.pdf` };
   }
 }
