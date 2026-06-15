@@ -227,23 +227,11 @@ export class ProcuracaoService {
     return { text, camposFaltando: faltando, hasLetterhead: cfg.hasLetterhead, configurado: !!cfg.template };
   }
 
-  // ── Geração do PDF: timbrado de fundo + texto preenchido por cima ─────────
-  async generatePdf(leadId: string, tenantId: string): Promise<{ buffer: Buffer; nome: string }> {
-    const t = await this.prisma.tenant.findUnique({
-      where: { id: tenantId },
-      select: { procuracao_template: true, procuracao_letterhead_key: true, procuracao_margins: true, procuracao_style: true },
-    });
-    if (!t?.procuracao_template) {
-      throw new BadRequestException('Configure o texto da procuração em Configurações → Procuração.');
-    }
-    const { vars } = await this.buildVars(leadId, tenantId);
-    const { text } = this.fill(t.procuracao_template, vars);
-    const margins = resolveMargins(t.procuracao_margins as any);
-    const style = resolveStyle(t.procuracao_style as any);
-
+  // ── Render: timbrado de fundo + texto preenchido por cima ─────────────────
+  private async renderToPdf(o: { text: string; margins: ProcMargins; style: ProcStyle; letterheadKey: string | null }): Promise<Buffer> {
     let pdf: PDFDocument;
     let page: PDFPage;
-    const key = t.procuracao_letterhead_key;
+    const key = o.letterheadKey;
     if (key) {
       const { stream, contentType } = await this.s3.getObjectStream(key);
       const bytes = await streamToBuffer(stream);
@@ -266,24 +254,72 @@ export class ProcuracaoService {
       page = pdf.addPage(A4);
     }
 
-    const font = await pdf.embedFont(FONT_OF[style.font]);
+    const font = await pdf.embedFont(FONT_OF[o.style.font]);
     const { width, height } = page.getSize();
-    const maxWidth = width - margins.left - margins.right;
-    const usableHeight = Math.max(0, height - margins.top - margins.bottom);
+    const maxWidth = width - o.margins.left - o.margins.right;
+    const usableHeight = Math.max(0, height - o.margins.top - o.margins.bottom);
     // Usa o tamanho configurado; se autoFit, reduz (até 8pt) p/ caber em 1
     // página — pdf-lib não pagina, então evita perder a parte de baixo sem aviso.
-    let size = style.size;
-    let L = layoutText(text, font, size, maxWidth, style.lineSpacing, style.justify);
-    while (style.autoFit && L.height > usableHeight && size > 8) {
+    let size = o.style.size;
+    let L = layoutText(o.text, font, size, maxWidth, o.style.lineSpacing, o.style.justify);
+    while (o.style.autoFit && L.height > usableHeight && size > 8) {
       size -= 0.5;
-      L = layoutText(text, font, size, maxWidth, style.lineSpacing, style.justify);
+      L = layoutText(o.text, font, size, maxWidth, o.style.lineSpacing, o.style.justify);
     }
-    drawLayout(page, L, font, size, rgb(0.1, 0.1, 0.12), margins.left, height - margins.top, maxWidth);
+    drawLayout(page, L, font, size, rgb(0.1, 0.1, 0.12), o.margins.left, height - o.margins.top, maxWidth);
+    return Buffer.from(await pdf.save());
+  }
 
-    const buffer = Buffer.from(await pdf.save());
+  // Procuração real preenchida com os dados do contato (botão do popup).
+  async generatePdf(leadId: string, tenantId: string): Promise<{ buffer: Buffer; nome: string }> {
+    const t = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { procuracao_template: true, procuracao_letterhead_key: true, procuracao_margins: true, procuracao_style: true },
+    });
+    if (!t?.procuracao_template) {
+      throw new BadRequestException('Configure o texto da procuração em Configurações → Procuração.');
+    }
+    const { vars } = await this.buildVars(leadId, tenantId);
+    const { text } = this.fill(t.procuracao_template, vars);
+    const buffer = await this.renderToPdf({
+      text,
+      margins: resolveMargins(t.procuracao_margins as any),
+      style: resolveStyle(t.procuracao_style as any),
+      letterheadKey: t.procuracao_letterhead_key ?? null,
+    });
     // Nome do arquivo sem acento (cabeçalho HTTP não lida bem com UTF-8 cru).
     const primeiro = (vars.nome_completo || 'cliente').split(' ')[0]
       .normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]/g, '') || 'cliente';
     return { buffer, nome: `Procuracao_${primeiro}.pdf` };
+  }
+
+  // Modelo de exemplo (botão "Baixar modelo" da config): usa o texto/estilo/
+  // margens da edição atual (ou os salvos) + dados FICTÍCIOS, pra ver o layout.
+  async generateSample(tenantId: string, input: { template?: string; margins?: ProcMargins; style?: any }): Promise<Buffer> {
+    const t = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { procuracao_template: true, procuracao_letterhead_key: true, procuracao_margins: true, procuracao_style: true },
+    });
+    const template = (input.template !== undefined ? input.template : t?.procuracao_template) || '';
+    if (!template.trim()) throw new BadRequestException('Escreva o texto da procuração antes de baixar o modelo.');
+    const now = new Date();
+    const vars: Record<string, string> = {
+      nome_completo: 'Fulano de Tal da Silva', cpf: '123.456.789-09',
+      rg: '1.234.567', orgao_emissor: 'SSP/AL', rg_completo: '1.234.567 SSP/AL',
+      nacionalidade: 'brasileiro(a)', estado_civil: 'casado(a)', profissao: 'comerciante',
+      endereco_completo: 'Rua Exemplo, nº 123, Centro, Arapiraca/AL, CEP 57300-000',
+      logradouro: 'Rua Exemplo', numero: '123', complemento: 'Sala 4', bairro: 'Centro',
+      cidade: 'Arapiraca', uf: 'AL', cep: '57300-000',
+      email: 'exemplo@email.com', telefone: '(82) 99999-9999',
+      data: now.toLocaleDateString('pt-BR'),
+      data_extenso: `${now.getDate()} de ${MESES[now.getMonth()]} de ${now.getFullYear()}`,
+    };
+    const { text } = this.fill(template, vars);
+    return this.renderToPdf({
+      text,
+      margins: input.margins ? resolveMargins(input.margins) : resolveMargins(t?.procuracao_margins as any),
+      style: input.style ? resolveStyle(input.style) : resolveStyle(t?.procuracao_style as any),
+      letterheadKey: t?.procuracao_letterhead_key ?? null,
+    });
   }
 }

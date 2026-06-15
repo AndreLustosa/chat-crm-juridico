@@ -70,4 +70,18 @@ export class ProcuracaoController {
     });
     res.end(buffer);
   }
+
+  // Modelo de exemplo com dados fictícios (botão "Baixar modelo" da config).
+  // Usa o texto/estilo/margens enviados (edição atual, ainda não salva) ou os salvos.
+  @Post('sample')
+  @Roles('ADMIN')
+  async sample(@Body() body: SaveConfigDto, @Req() req: any, @Res() res: any) {
+    const buffer = await this.svc.generateSample(this.tenant(req), body);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': 'attachment; filename="Procuracao_modelo.pdf"',
+      'Content-Length': buffer.length,
+    });
+    res.end(buffer);
+  }
 }
