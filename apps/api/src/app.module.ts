@@ -40,6 +40,7 @@ import { LegalTemplatesModule } from './legal-templates/legal-templates.module';
 import { HonorariosModule } from './honorarios/honorarios.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { ContractsModule } from './contracts/contracts.module';
+import { ProcuracaoModule } from './procuracao/procuracao.module';
 import { ClicksignModule } from './clicksign/clicksign.module';
 import { S3Module } from './s3/s3.module';
 import { McpModule } from './mcp/mcp.module';
@@ -139,6 +140,7 @@ import { RolesGuard } from './auth/guards/roles.guard';
     HonorariosModule,
     DashboardModule,
     ContractsModule,
+    ProcuracaoModule,
     ClicksignModule,
     McpModule,
     AutomationsModule,

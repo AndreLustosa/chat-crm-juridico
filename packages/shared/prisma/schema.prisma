@@ -23,6 +23,10 @@ model Tenant {
   email                      String? // e-mail de contato do escritório
   oab                        String? // OAB do escritório / advogado responsável
   site                       String? // site do escritório
+  // ─── Procuração: config por escritório (timbrado + texto modelo) ───────────
+  procuracao_letterhead_key  String? // S3 key do timbrado (PDF/imagem) usado de fundo
+  procuracao_template        String? // texto da procuração com {{campos}} (preenchidos c/ dados do cliente)
+  procuracao_margins         Json?   // área do texto sobre o timbrado: { top, bottom, left, right } em pt
   ai_enabled                 Boolean                          @default(true) // gate master da IA (#77): false = IA não atende este escritório. Interno sempre on.
   // ─── SaaS: assinatura/trial por escritório (Fase 1) ───────────────────────
   is_internal                Boolean                          @default(false) // escritório do dono — nunca expira
