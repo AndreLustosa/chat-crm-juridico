@@ -14,7 +14,7 @@ const MAX_LETTERHEAD_BYTES = 10 * 1024 * 1024; // 10 MB
 class SaveConfigDto {
   @IsOptional() @IsString() template?: string;
   @IsOptional() @IsObject() margins?: { top: number; bottom: number; left: number; right: number };
-  @IsOptional() @IsObject() style?: { font?: string; size?: number; lineSpacing?: number; justify?: boolean; autoFit?: boolean };
+  @IsOptional() @IsObject() style?: { font?: string; size?: number; lineSpacing?: number; justify?: boolean; autoFit?: boolean; upperName?: boolean };
 }
 class GenerateDto {
   @IsString() leadId: string;

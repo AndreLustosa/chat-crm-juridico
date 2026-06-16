@@ -25,8 +25,9 @@ export interface ProcStyle {
   lineSpacing: number; // entrelinha (1.15 compacto … 2 duplo); padrão ~1.34
   justify: boolean;    // corpo justificado (true) ou à esquerda (false)
   autoFit: boolean;    // reduzir a fonte p/ caber em 1 página
+  upperName: boolean;  // nome do cliente ({{nome_completo}}) em MAIÚSCULAS
 }
-const DEFAULT_STYLE: ProcStyle = { font: 'times', size: 12, lineSpacing: 1.34, justify: true, autoFit: true };
+const DEFAULT_STYLE: ProcStyle = { font: 'times', size: 12, lineSpacing: 1.34, justify: true, autoFit: true, upperName: false };
 function resolveStyle(stored: any): ProcStyle {
   const s = (stored ?? {}) as Partial<ProcStyle>;
   return {
@@ -35,6 +36,7 @@ function resolveStyle(stored: any): ProcStyle {
     lineSpacing: typeof s.lineSpacing === 'number' && s.lineSpacing >= 1 && s.lineSpacing <= 3 ? s.lineSpacing : DEFAULT_STYLE.lineSpacing,
     justify: s.justify === undefined ? true : !!s.justify,
     autoFit: s.autoFit === undefined ? true : !!s.autoFit,
+    upperName: !!s.upperName,
   };
 }
 const FONT_REGULAR: Record<ProcStyle['font'], StandardFonts> = {
@@ -179,7 +181,7 @@ export class ProcuracaoService {
     };
   }
 
-  async saveConfig(tenantId: string, input: { template?: string; margins?: ProcMargins; style?: { font?: string; size?: number; lineSpacing?: number; justify?: boolean; autoFit?: boolean } }) {
+  async saveConfig(tenantId: string, input: { template?: string; margins?: ProcMargins; style?: { font?: string; size?: number; lineSpacing?: number; justify?: boolean; autoFit?: boolean; upperName?: boolean } }) {
     await this.prisma.tenant.update({
       where: { id: tenantId },
       data: {
@@ -316,16 +318,18 @@ export class ProcuracaoService {
       throw new BadRequestException('Configure o texto da procuração em Configurações → Procuração.');
     }
     const { vars } = await this.buildVars(leadId, tenantId);
+    const style = resolveStyle(t.procuracao_style as any);
+    // Nome do arquivo a partir do nome ORIGINAL (sem caixa-alta), sem acento.
+    const primeiro = (vars.nome_completo || 'cliente').split(' ')[0]
+      .normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]/g, '') || 'cliente';
+    if (style.upperName && vars.nome_completo) vars.nome_completo = vars.nome_completo.toUpperCase();
     const { text } = this.fill(t.procuracao_template, vars);
     const buffer = await this.renderToPdf({
       text,
       margins: resolveMargins(t.procuracao_margins as any),
-      style: resolveStyle(t.procuracao_style as any),
+      style,
       letterheadKey: t.procuracao_letterhead_key ?? null,
     });
-    // Nome do arquivo sem acento (cabeçalho HTTP não lida bem com UTF-8 cru).
-    const primeiro = (vars.nome_completo || 'cliente').split(' ')[0]
-      .normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]/g, '') || 'cliente';
     return { buffer, nome: `Procuracao_${primeiro}.pdf` };
   }
 
@@ -350,11 +354,13 @@ export class ProcuracaoService {
       data: now.toLocaleDateString('pt-BR'),
       data_extenso: `${now.getDate()} de ${MESES[now.getMonth()]} de ${now.getFullYear()}`,
     };
+    const style = input.style ? resolveStyle(input.style) : resolveStyle(t?.procuracao_style as any);
+    if (style.upperName) vars.nome_completo = vars.nome_completo.toUpperCase();
     const { text } = this.fill(template, vars);
     return this.renderToPdf({
       text,
       margins: input.margins ? resolveMargins(input.margins) : resolveMargins(t?.procuracao_margins as any),
-      style: input.style ? resolveStyle(input.style) : resolveStyle(t?.procuracao_style as any),
+      style,
       letterheadKey: t?.procuracao_letterhead_key ?? null,
     });
   }
