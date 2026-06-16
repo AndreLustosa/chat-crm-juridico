@@ -179,10 +179,12 @@ const DOC_OPENAI_PRICING: Record<string, { input: number; output: number }> = {
   'gpt-4.1-mini': { input: 0.40,  output: 1.60  },
   'gpt-5':        { input: 15.00, output: 60.00 },
 };
-const DOC_MAX_IMAGES = 4;                        // só as 4 imagens mais recentes
+const DOC_MAX_IMAGES = 6;                        // imagens mais recentes da conversa
 const DOC_MAX_IMAGE_BYTES = 6 * 1024 * 1024;     // pula imagem > 6MB (custo/token)
-const DOC_MAX_PDFS = 2;                           // só os 2 PDFs mais recentes
+const DOC_MAX_PDFS = 3;                           // PDFs mais recentes da conversa
 const DOC_MAX_PDF_BYTES = 8 * 1024 * 1024;        // pula PDF > 8MB (páginas/custo)
+const DOC_MAX_HIST_MSGS = 40;                     // mensagens de texto recentes pro contexto
+const DOC_MAX_HIST_CHARS = 4000;                  // teto do histórico (tokens/custo)
 const DOC_AI_TIMEOUT_MS = 120_000;
 const DOC_MAX_TOKENS = 1200;
 // Prompt COMPLETO configurável pelo admin master via AI_DOC_PROMPT (instruções +
@@ -642,12 +644,24 @@ export class ProcuracaoService {
 
     // Prompt COMPLETO (instruções + lista de campos), configurável pelo admin master.
     const fullPrompt = (await this.settings.get('AI_DOC_PROMPT'))?.trim() || DEFAULT_DOC_PROMPT;
-    // Cross-check: dá pra IA o nome conhecido do contato p/ confirmar que o
-    // documento é mesmo dessa pessoa (campo confere_cliente no JSON).
+    // Cross-check: nome conhecido do contato p/ a IA confirmar que o documento é
+    // dessa pessoa (campo confere_cliente no JSON).
     const nomeConhecido = (((lead as any).full_name || lead.name || '') as string).trim();
-    const userText = nomeConhecido
-      ? `Documento(s) em anexo para leitura. O contato desta conversa é conhecido como: "${nomeConhecido}". Confirme se o documento pertence a essa pessoa (campo "confere_cliente").`
-      : 'Documento(s) em anexo para leitura.';
+    // Acesso ao HISTÓRICO de texto da conversa — o cliente pode ter digitado
+    // nome/CPF/endereço. A IA usa isso junto com os documentos.
+    const txts = await this.prisma.message.findMany({
+      where: { conversation_id: convo.id, type: 'text', text: { not: null } },
+      orderBy: { created_at: 'desc' }, take: DOC_MAX_HIST_MSGS,
+    });
+    const historico = txts.reverse()
+      .filter((m) => (m.text || '').trim())
+      .map((m) => `${m.direction === 'in' ? 'Cliente' : 'Atendente'}: ${(m.text || '').replace(/\s+/g, ' ').trim()}`)
+      .join('\n').slice(-DOC_MAX_HIST_CHARS);
+    const userText = [
+      nomeConhecido ? `O contato desta conversa é conhecido como: "${nomeConhecido}". Confirme se o documento pertence a essa pessoa (campo "confere_cliente").` : '',
+      historico ? `Considere também o que o cliente informou por texto na conversa:\n${historico}` : '',
+      'Documento(s) em anexo para leitura.',
+    ].filter(Boolean).join('\n\n');
     const extrairJson = (raw: string): any => {
       try { return JSON.parse((raw.match(/\{[\s\S]*\}/) || [raw])[0]); } catch { return null; }
     };
@@ -669,7 +683,7 @@ export class ProcuracaoService {
         });
         await this.saveDocUsage(amodel, resp.usage, convo.id, userId, tenantId);
         const p = extrairJson((resp.content?.[0] as any)?.text || '');
-        if (p && p.is_documento !== false) parsedResults.push(p);
+        if (p) parsedResults.push(p); // aceita comprovante tb (is_documento=false mas tem endereço)
       } catch (e: any) {
         this.logger.warn(`[PROC-IA] Falha ao ler PDF conv=${conversationId}: ${e.message}`);
       }
@@ -689,7 +703,7 @@ export class ProcuracaoService {
           });
           await this.saveDocUsage(docModel, resp.usage, convo.id, userId, tenantId);
           const p = extrairJson((resp.content?.[0] as any)?.text || '');
-          if (p && p.is_documento !== false) parsedResults.push(p);
+          if (p) parsedResults.push(p); // aceita comprovante tb (is_documento=false mas tem endereço)
         } else {
           const ai = new OpenAI({ apiKey: openaiKey, timeout: DOC_AI_TIMEOUT_MS, maxRetries: 1 });
           const blocks = imgData.map((d) => ({ type: 'image_url', image_url: { url: `data:${d.mime};base64,${d.b64}` } }));
@@ -704,7 +718,7 @@ export class ProcuracaoService {
           });
           await this.saveDocUsage(docModel, resp.usage, convo.id, userId, tenantId);
           const p = extrairJson(resp.choices[0]?.message?.content || '');
-          if (p && p.is_documento !== false) parsedResults.push(p);
+          if (p) parsedResults.push(p); // aceita comprovante tb (is_documento=false mas tem endereço)
         }
       } catch (e: any) {
         this.logger.warn(`[PROC-IA] Falha ao ler imagem conv=${conversationId}: ${e.message}`);
