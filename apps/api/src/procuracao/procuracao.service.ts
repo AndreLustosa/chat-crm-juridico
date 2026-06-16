@@ -75,29 +75,40 @@ function fmtCep(v?: string | null): string {
 const PARA_GAP_RATIO = 0.55;   // folga extra após cada parágrafo
 const CENTER_MAX_RATIO = 0.72; // linha única mais curta que isto → centraliza
 
-// Palavra com marca de negrito (texto entre **...** vira negrito).
-type Word = { t: string; b: boolean };
+// Uma PALAVRA é uma sequência de SEGMENTOS colados (cada um regular ou negrito),
+// desenhados sem espaço entre si — só há espaço ENTRE palavras. Assim "**X**," vira
+// "X," (X negrito, vírgula normal) sem espaço sobrando antes da vírgula.
+type Seg = { t: string; b: boolean };
+type Word = Seg[];
 type LayoutItem = { words: Word[]; align: 'justify' | 'left' | 'center'; dy: number };
 interface Layout { items: LayoutItem[]; height: number; space: number }
 
-// Quebra uma linha em palavras, alternando negrito a cada par de "**".
+// Quebra uma linha em palavras, alternando negrito a cada "**"; segmentos sem
+// espaço entre eles ficam na MESMA palavra (colados).
 function parseWords(line: string): Word[] {
-  const out: Word[] = [];
-  const parts = line.split('**');
-  for (let i = 0; i < parts.length; i++) {
-    if (!parts[i]) continue;
-    const bold = i % 2 === 1; // trechos ímpares estão entre ** **
-    for (const t of parts[i].split(/\s+/)) if (t) out.push({ t, b: bold });
+  const words: Word[] = [];
+  let cur: Seg[] = [];
+  let buf = '';
+  let bold = false;
+  const flush = () => { if (buf) { cur.push({ t: buf, b: bold }); buf = ''; } };
+  const endWord = () => { flush(); if (cur.length) { words.push(cur); cur = []; } };
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] === '*' && line[i + 1] === '*') { flush(); bold = !bold; i++; continue; }
+    const ch = line[i];
+    if (ch === ' ' || ch === '\t') { endWord(); continue; }
+    buf += ch;
   }
-  return out;
+  endWord();
+  return words;
 }
 
 function layoutText(text: string, regular: PDFFont, bold: PDFFont, size: number, maxWidth: number, lineRatio: number, justify: boolean): Layout {
-  const wW = (w: Word) => (w.b ? bold : regular).widthOfTextAtSize(w.t, size);
+  const segW = (s: Seg) => (s.b ? bold : regular).widthOfTextAtSize(s.t, size);
+  const wW = (w: Word) => w.reduce((a, s) => a + segW(s), 0);
   const space = regular.widthOfTextAtSize(' ', size);
   const lineHeight = size * lineRatio;
   const paraGap = lineHeight * PARA_GAP_RATIO;
-  const natW = (ws: Word[]) => ws.reduce((s, w) => s + wW(w), 0) + Math.max(0, ws.length - 1) * space;
+  const natW = (ws: Word[]) => ws.reduce((a, w) => a + wW(w), 0) + Math.max(0, ws.length - 1) * space;
   const items: LayoutItem[] = [];
   let off = 0;
   for (const raw of (text || '').replace(/\r/g, '').split('\n')) {
@@ -125,13 +136,15 @@ function layoutText(text: string, regular: PDFFont, bold: PDFFont, size: number,
   return { items, height: off, space };
 }
 
-// Desenha palavra a palavra (cada uma na sua fonte: regular ou negrito).
+// Desenha palavra a palavra; dentro da palavra, cada segmento na sua fonte e
+// colado ao anterior. Espaço/gap só ENTRE palavras.
 function drawLayout(page: PDFPage, L: Layout, regular: PDFFont, bold: PDFFont, size: number, color: ReturnType<typeof rgb>, leftX: number, topY: number, maxWidth: number) {
-  const fontOf = (w: Word) => (w.b ? bold : regular);
-  const wW = (w: Word) => fontOf(w).widthOfTextAtSize(w.t, size);
+  const segFont = (s: Seg) => (s.b ? bold : regular);
+  const segW = (s: Seg) => segFont(s).widthOfTextAtSize(s.t, size);
+  const wW = (w: Word) => w.reduce((a, s) => a + segW(s), 0);
   for (const it of L.items) {
     const y = topY - it.dy;
-    const sumW = it.words.reduce((s, w) => s + wW(w), 0);
+    const sumW = it.words.reduce((a, w) => a + wW(w), 0);
     let x = leftX;
     let gap = L.space;
     if (it.align === 'justify' && it.words.length > 1) {
@@ -141,8 +154,8 @@ function drawLayout(page: PDFPage, L: Layout, regular: PDFFont, bold: PDFFont, s
       x = leftX + (maxWidth - (sumW + Math.max(0, it.words.length - 1) * L.space)) / 2;
     }
     for (const w of it.words) {
-      page.drawText(w.t, { x, y, size, font: fontOf(w), color });
-      x += wW(w) + gap;
+      for (const s of w) { page.drawText(s.t, { x, y, size, font: segFont(s), color }); x += segW(s); }
+      x += gap;
     }
   }
 }
