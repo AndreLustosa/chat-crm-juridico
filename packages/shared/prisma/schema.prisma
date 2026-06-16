@@ -353,6 +353,10 @@ model Lead {
   address_neighborhood   String? // bairro
   address_city           String?
   address_state          String? // UF
+  // Quando a IA já tentou ler o documento (foto de RG/CNH) da conversa e
+  // preencher a qualificação. Marcado na 1ª tentativa pra não reprocessar
+  // (cada leitura custa IA). Null = ainda não tentou.
+  qualificacao_ia_em     DateTime?
 
   @@unique([tenant_id, phone])
   @@index([phone])
@@ -1722,6 +1726,9 @@ model ContractSignature {
   lead_id         String
   conversation_id String
 
+  // Tipo do documento assinado (mesmo fluxo Clicksign p/ contrato e procuração).
+  document_kind String @default("CONTRATO_TRABALHISTA") // CONTRATO_TRABALHISTA | PROCURACAO
+
   // Referências Clicksign
   cs_document_key          String  @unique // key do documento no Clicksign
   cs_signer_key            String? // key do signatário
@@ -1745,6 +1752,7 @@ model ContractSignature {
   @@index([conversation_id])
   @@index([cs_document_key])
   @@index([status])
+  @@index([document_kind])
 }
 
 // ===============================================

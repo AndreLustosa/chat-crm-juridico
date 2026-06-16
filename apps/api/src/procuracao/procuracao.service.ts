@@ -1,6 +1,14 @@
 import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MediaS3Service } from '../media/s3.service';
+import { FileStorageService } from '../media/filesystem.service';
+import { SettingsService } from '../settings/settings.service';
+import { WhatsappService } from '../whatsapp/whatsapp.service';
+import { ChatGateway } from '../gateway/chat.gateway';
+import { assertAiCostCap } from '../common/utils/ai-cost-cap.util';
+import { buildTokenParam } from '../common/utils/openai-token-param.util';
+import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 import { PDFDocument, StandardFonts, rgb, type PDFPage, type PDFFont } from 'pdf-lib';
 import { Readable } from 'stream';
 
@@ -162,10 +170,69 @@ function drawLayout(page: PDFPage, L: Layout, regular: PDFFont, bold: PDFFont, s
   }
 }
 
+// ── Leitura automática do documento (foto de RG/CNH) por IA de visão ─────────
+// Preço por 1M tokens (mesma tabela das petições) — só p/ registrar custo.
+const DOC_OPENAI_PRICING: Record<string, { input: number; output: number }> = {
+  'gpt-4o-mini':  { input: 0.15,  output: 0.60  },
+  'gpt-4o':       { input: 5.00,  output: 15.00 },
+  'gpt-4.1':      { input: 2.00,  output: 8.00  },
+  'gpt-4.1-mini': { input: 0.40,  output: 1.60  },
+  'gpt-5':        { input: 15.00, output: 60.00 },
+};
+const DOC_MAX_IMAGES = 4;                        // só as 4 imagens mais recentes
+const DOC_MAX_IMAGE_BYTES = 6 * 1024 * 1024;     // pula imagem > 6MB (custo/token)
+const DOC_MAX_PDFS = 2;                           // só os 2 PDFs mais recentes
+const DOC_MAX_PDF_BYTES = 8 * 1024 * 1024;        // pula PDF > 8MB (páginas/custo)
+const DOC_AI_TIMEOUT_MS = 120_000;
+const DOC_MAX_TOKENS = 1200;
+// Prompt COMPLETO configurável pelo admin master via AI_DOC_PROMPT (instruções +
+// lista de campos). O código mapeia as CHAVES exatas do JSON (full_name, cpf, rg,
+// rg_issuer, nationality, marital_status, profession, address_*) — se o master
+// renomear/remover uma chave, aquele campo deixa de ser preenchido (é o trade-off
+// de ter acesso total). Vazio → volta a este padrão.
+const DEFAULT_DOC_PROMPT =
+  'Você lê documentos de identificação brasileiros (RG, CNH) e comprovantes e extrai os dados cadastrais. ' +
+  'Responda SOMENTE com um objeto JSON válido, sem texto antes/depois e sem markdown.\n\n' +
+  'Analise o(s) documento(s)/imagem(ns) em anexo. Se houver um documento de identidade (RG/CNH) ou comprovante de endereço legível, ' +
+  'extraia os campos abaixo. Se um campo não estiver visível/legível, use null — NÃO invente.\n\n' +
+  'Retorne JSON com EXATAMENTE estas chaves:\n' +
+  '{\n' +
+  '  "is_documento": boolean,        // true se há documento de identidade legível\n' +
+  '  "full_name": string|null,       // nome civil completo\n' +
+  '  "cpf": string|null,             // só números\n' +
+  '  "rg": string|null,              // número do RG (sem o órgão)\n' +
+  '  "rg_issuer": string|null,       // órgão emissor, ex: "SSP/AL"\n' +
+  '  "nationality": string|null,     // "brasileiro" ou "brasileira" conforme o sexo no documento; senão a nacionalidade indicada\n' +
+  '  "marital_status": string|null,  // estado civil, se constar\n' +
+  '  "profession": string|null,      // profissão, se constar\n' +
+  '  "address_cep": string|null,\n' +
+  '  "address_street": string|null,\n' +
+  '  "address_number": string|null,\n' +
+  '  "address_complement": string|null,\n' +
+  '  "address_neighborhood": string|null,\n' +
+  '  "address_city": string|null,\n' +
+  '  "address_state": string|null    // UF, 2 letras\n' +
+  '}';
+// Preço Anthropic por 1M tokens (mesma tabela das petições) — só p/ registrar custo.
+// Casado por prefixo do model id; ao adotar uma família nova (ex.: claude-vega),
+// adicione o prefixo aqui senão o custo cai no fallback (pode subestimar).
+const DOC_ANTHROPIC_PRICING: Record<string, { input: number; output: number }> = {
+  'claude-opus':   { input: 15.0, output: 75.0 },
+  'claude-sonnet': { input: 3.0,  output: 15.0 },
+  'claude-haiku':  { input: 0.8,  output: 4.0  },
+};
+
 @Injectable()
 export class ProcuracaoService {
   private readonly logger = new Logger(ProcuracaoService.name);
-  constructor(private prisma: PrismaService, private s3: MediaS3Service) {}
+  constructor(
+    private prisma: PrismaService,
+    private s3: MediaS3Service,
+    private fileStorage: FileStorageService,
+    private settings: SettingsService,
+    private whatsapp: WhatsappService,
+    private chatGateway: ChatGateway,
+  ) {}
 
   // ── Config por escritório (timbrado + texto modelo) ──────────────────────
   async getConfig(tenantId: string) {
@@ -261,6 +328,9 @@ export class ProcuracaoService {
     const cfg = await this.getConfig(tenantId);
     const { vars } = await this.buildVars(leadId, tenantId);
     const { text, faltando } = this.fill(cfg.template, vars);
+    // Nome completo é obrigatório p/ gerar (mesmo que o template não use a
+    // variável) — então sempre reportar como faltando se estiver vazio.
+    if (!vars.nome_completo.trim() && !faltando.includes('nome_completo')) faltando.push('nome_completo');
     return { text, camposFaltando: faltando, hasLetterhead: cfg.hasLetterhead, configurado: !!cfg.template };
   }
 
@@ -367,5 +437,319 @@ export class ProcuracaoService {
       style,
       letterheadKey: t?.procuracao_letterhead_key ?? null,
     });
+  }
+
+  // Gera a procuração e ENVIA o PDF pro cliente no WhatsApp da conversa
+  // (mesmo padrão do contrato: Message + S3 + Evolution base64 + socket).
+  async sendViaWhatsapp(conversationId: string, tenantId: string): Promise<{ messageId: string }> {
+    const convo = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, tenant_id: tenantId },
+      include: { lead: true },
+    });
+    if (!convo?.lead) throw new BadRequestException('Conversa inválida.');
+    const { buffer, nome } = await this.generatePdf(convo.lead.id, tenantId); // valida nome completo
+    const fileName = nome.endsWith('.pdf') ? nome : `${nome}.pdf`;
+    const caption = '📄 Procuração';
+
+    // 1. Mensagem (aparece no chat)
+    const tempExtId = `out_procuracao_${conversationId}`;
+    const msg = await this.prisma.message.create({
+      data: {
+        conversation_id: convo.id,
+        direction: 'out',
+        type: 'document',
+        text: caption,
+        external_message_id: tempExtId,
+        status: 'enviando',
+      },
+    });
+
+    // 2. S3 + 3. Media
+    const s3Key = `procuracao/sent/${msg.id}.pdf`;
+    await this.s3.uploadBuffer(s3Key, buffer, 'application/pdf');
+    await this.prisma.media.create({
+      data: { message_id: msg.id, s3_key: s3Key, mime_type: 'application/pdf', size: buffer.length, original_name: fileName },
+    });
+
+    // 4. Enviar via WhatsApp (base64 puro, como o contrato)
+    let sendStatus = 'enviado';
+    let externalId = tempExtId;
+    try {
+      const result: any = await this.whatsapp.sendMedia(
+        convo.lead.phone, 'document', buffer.toString('base64'), caption, convo.instance_name || undefined, fileName,
+      );
+      if (result?.statusCode >= 400 || result?.error) { this.logger.error(`Evolution erro procuração: ${JSON.stringify(result)}`); sendStatus = 'erro'; }
+      else externalId = result?.key?.id || tempExtId;
+    } catch (e: any) {
+      this.logger.error(`Exceção ao enviar procuração: ${e.message}`);
+      sendStatus = 'erro';
+    }
+
+    // 5. Atualizar mensagem + conversa + socket
+    await this.prisma.message.update({ where: { id: msg.id }, data: { external_message_id: externalId, status: sendStatus } });
+    await this.prisma.conversation.update({ where: { id: convo.id }, data: { last_message_at: new Date() } });
+    this.chatGateway.emitNewMessage(convo.id, { ...msg, status: sendStatus, external_message_id: externalId });
+    this.chatGateway.emitConversationsUpdate((convo as any).tenant_id ?? null);
+
+    if (sendStatus === 'erro') throw new BadRequestException('Falha ao enviar a procuração pelo WhatsApp.');
+    return { messageId: msg.id };
+  }
+
+  // ── Preenchimento automático da qualificação a partir do documento ─────────
+  // Lê os bytes de uma mídia: novas ficam no filesystem (file_path); antigas no
+  // S3 (s3_key). Mesma prioridade do MediaController.
+  private async readMediaBytes(media: { file_path: string | null; s3_key: string | null }): Promise<Buffer | null> {
+    try {
+      if (media.file_path && (await this.fileStorage.exists(media.file_path))) {
+        return await this.fileStorage.read(media.file_path);
+      }
+    } catch { /* cai pro S3 */ }
+    if (media.s3_key) {
+      try {
+        const { stream } = await this.s3.getObjectStream(media.s3_key);
+        return await streamToBuffer(stream);
+      } catch { return null; }
+    }
+    return null;
+  }
+
+  private async saveDocUsage(model: string, usage: any, conversationId: string | null, userId: string, tenantId: string): Promise<void> {
+    if (!usage) return;
+    // OpenAI usa prompt_tokens/completion_tokens; Anthropic usa input_tokens/output_tokens.
+    const promptTokens = usage.prompt_tokens ?? usage.input_tokens ?? 0;
+    const completionTokens = usage.completion_tokens ?? usage.output_tokens ?? 0;
+    const totalTokens = usage.total_tokens ?? (promptTokens + completionTokens);
+    const isClaude = model.startsWith('claude');
+    const table = isClaude ? DOC_ANTHROPIC_PRICING : DOC_OPENAI_PRICING;
+    const priceEntry = Object.entries(table).find(([k]) => model.startsWith(k));
+    if (!priceEntry) this.logger.warn(`[PROC-IA] Modelo ${model} sem preço na tabela — usando fallback (custo pode subestimar). Adicione o prefixo em DOC_*_PRICING.`);
+    const price = priceEntry ? priceEntry[1] : (isClaude ? { input: 3.0, output: 15.0 } : { input: 5.0, output: 15.0 });
+    const costUsd =
+      (promptTokens * price.input) / 1_000_000 +
+      (completionTokens * price.output) / 1_000_000;
+    try {
+      await this.prisma.aiUsage.create({
+        data: {
+          conversation_id: conversationId,
+          skill_id: null,
+          model,
+          call_type: 'qualificacao',
+          prompt_tokens: promptTokens,
+          completion_tokens: completionTokens,
+          total_tokens: totalTokens,
+          cost_usd: costUsd,
+          user_id: userId,
+          tenant_id: tenantId,
+          meta_json: { feature: 'procuracao-doc-extraction' } as any,
+        } as any,
+      });
+    } catch (e: any) {
+      this.logger.warn(`[PROC-IA] Falha ao registrar uso: ${e.message}`);
+    }
+  }
+
+  /**
+   * Lê o documento que o cliente mandou na conversa (foto de RG/CNH via OpenAI,
+   * ou PDF via Claude/Anthropic) e GRAVA os campos VAZIOS da qualificação do
+   * contato — nunca sobrescreve o que já foi preenchido manualmente. Só reanalisa
+   * mídia que chegou DEPOIS da última tentativa (marcador `qualificacao_ia_em`)
+   * pra não gastar IA à toa. Sem documento/sem chave do provedor → não chama a IA
+   * (sem custo) e tenta de novo quando chegar.
+   */
+  async autoPreencherDocumento(
+    conversationId: string,
+    userId: string,
+    tenantId: string,
+  ): Promise<{ preenchidos: string[]; jaTentou?: boolean; semDocumento?: boolean }> {
+    if (!userId) throw new BadRequestException('userId obrigatório');
+    const convo = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, tenant_id: tenantId },
+      include: { lead: true },
+    });
+    if (!convo?.lead) throw new BadRequestException('Conversa inválida.');
+    const lead = convo.lead;
+
+    // Marcador da última tentativa. Se já tentou antes, só olha mídia que chegou
+    // DEPOIS — assim pega documento enviado mais tarde, sem reanalisar tudo nem
+    // regastar IA quando não chegou nada novo.
+    const marker: Date | null = (lead as any).qualificacao_ia_em ?? null;
+    const sinceMarker = marker ? { created_at: { gt: marker } } : {};
+    // Imagens (lidas pela OpenAI) e PDFs (lidos pela Claude/Anthropic) — consultas
+    // SEPARADAS, cada provedor com a mídia que sabe ler.
+    const [imgs, pdfs] = await Promise.all([
+      this.prisma.message.findMany({
+        where: { conversation_id: convo.id, type: 'image', ...sinceMarker },
+        include: { media: true }, orderBy: { created_at: 'desc' }, take: DOC_MAX_IMAGES,
+      }),
+      this.prisma.message.findMany({
+        where: { conversation_id: convo.id, type: 'document', media: { mime_type: 'application/pdf' }, ...sinceMarker },
+        include: { media: true }, orderBy: { created_at: 'desc' }, take: DOC_MAX_PDFS,
+      }),
+    ]);
+    const comImg = imgs.filter((m) => m.media && (m.media.file_path || m.media.s3_key));
+    const comPdf = pdfs.filter((m) => m.media && (m.media.file_path || m.media.s3_key));
+    if (!comImg.length && !comPdf.length) return { preenchidos: [], jaTentou: !!marker, semDocumento: !marker }; // sem custo
+
+    // Chaves dos provedores. OpenAI e Claude leem imagem; só Claude lê PDF.
+    const aiConfig = await this.settings.getAiConfig();
+    const openaiKey = aiConfig.apiKey || '';
+    const anthropicKey = (await this.settings.get('ANTHROPIC_API_KEY')) || process.env.ANTHROPIC_API_KEY || '';
+
+    // Modelo das FOTOS define o provedor: se for Claude, a imagem vai pra Anthropic.
+    const docModel = (await this.settings.get('AI_DOC_MODEL')) || 'gpt-4o-mini';
+    const imgUsaClaude = docModel.startsWith('claude');
+    const imgKey = imgUsaClaude ? anthropicKey : openaiKey;
+
+    // Bytes das imagens (o formato do bloco é montado por provedor na hora da chamada).
+    const imgData: { mime: string; b64: string }[] = [];
+    if (comImg.length && imgKey) {
+      for (const m of comImg) {
+        const media = m.media!;
+        if (media.size && media.size > DOC_MAX_IMAGE_BYTES) continue;
+        const buf = await this.readMediaBytes(media);
+        if (!buf) { this.logger.warn(`[PROC-IA] Imagem ${media.id} inacessível (sem bytes) conv=${conversationId}`); continue; }
+        if (buf.length > DOC_MAX_IMAGE_BYTES) continue;
+        imgData.push({ mime: (media.mime_type || 'image/jpeg').split(';')[0].trim(), b64: buf.toString('base64') });
+      }
+    } else if (comImg.length && !imgKey) {
+      this.logger.warn(`[PROC-IA] Imagem na conversa ${conversationId} mas a chave do provedor (${imgUsaClaude ? 'Anthropic' : 'OpenAI'}) está ausente — imagem ignorada.`);
+    }
+    // Blocos de PDF (sempre Anthropic — só Claude lê PDF nativamente).
+    const pdfBlocks: any[] = [];
+    if (comPdf.length && anthropicKey) {
+      for (const m of comPdf) {
+        const media = m.media!;
+        if (media.size && media.size > DOC_MAX_PDF_BYTES) continue;
+        const buf = await this.readMediaBytes(media);
+        if (!buf || buf.length > DOC_MAX_PDF_BYTES) continue;
+        pdfBlocks.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: buf.toString('base64') } });
+      }
+    } else if (comPdf.length && !anthropicKey) {
+      this.logger.warn(`[PROC-IA] PDF na conversa ${conversationId} mas ANTHROPIC_API_KEY ausente — PDF ignorado.`);
+    }
+    if (!imgData.length && !pdfBlocks.length) return { preenchidos: [], semDocumento: true }; // nada legível/sem chave
+
+    // Cost cap por user/tenant antes de qualquer chamada (anti-DoS financeiro).
+    await assertAiCostCap(this.prisma, userId, tenantId);
+
+    // Marca a tentativa ANTES das chamadas: mesmo que a IA falhe, não reprocessa
+    // a mesma mídia (evita loop de custo se o documento for ilegível/IA der erro).
+    await this.prisma.lead.update({ where: { id: lead.id }, data: { qualificacao_ia_em: new Date() } as any });
+
+    // Prompt COMPLETO (instruções + lista de campos), configurável pelo admin master.
+    const fullPrompt = (await this.settings.get('AI_DOC_PROMPT'))?.trim() || DEFAULT_DOC_PROMPT;
+    const userText = 'Documento(s) em anexo para leitura.';
+    const extrairJson = (raw: string): any => {
+      try { return JSON.parse((raw.match(/\{[\s\S]*\}/) || [raw])[0]); } catch { return null; }
+    };
+
+    // Resultados em ordem de prioridade: PDF primeiro (RG/CNH em PDF costuma ser
+    // mais legível), depois imagem. O merge adiante preenche só campo vazio.
+    const parsedResults: any[] = [];
+
+    // 1) PDFs via Anthropic (Claude lê PDF nativamente, inclusive escaneado).
+    if (pdfBlocks.length) {
+      const amodel = (await this.settings.get('AI_DOC_ANTHROPIC_MODEL')) || 'claude-sonnet-4-6';
+      try {
+        const anthropic = new Anthropic({ apiKey: anthropicKey, timeout: DOC_AI_TIMEOUT_MS, maxRetries: 1 });
+        const resp = await anthropic.messages.create({
+          model: amodel,
+          max_tokens: DOC_MAX_TOKENS,
+          system: fullPrompt,
+          messages: [{ role: 'user', content: [{ type: 'text', text: userText }, ...pdfBlocks] as any }],
+        });
+        await this.saveDocUsage(amodel, resp.usage, convo.id, userId, tenantId);
+        const p = extrairJson((resp.content?.[0] as any)?.text || '');
+        if (p && p.is_documento !== false) parsedResults.push(p);
+      } catch (e: any) {
+        this.logger.warn(`[PROC-IA] Falha ao ler PDF conv=${conversationId}: ${e.message}`);
+      }
+    }
+
+    // 2) Imagens — OpenAI (image_url) ou Claude (image block), conforme o modelo escolhido.
+    if (imgData.length) {
+      try {
+        if (imgUsaClaude) {
+          const anthropic = new Anthropic({ apiKey: anthropicKey, timeout: DOC_AI_TIMEOUT_MS, maxRetries: 1 });
+          const blocks = imgData.map((d) => ({ type: 'image', source: { type: 'base64', media_type: d.mime, data: d.b64 } }));
+          const resp = await anthropic.messages.create({
+            model: docModel,
+            max_tokens: DOC_MAX_TOKENS,
+            system: fullPrompt,
+            messages: [{ role: 'user', content: [{ type: 'text', text: userText }, ...blocks] as any }],
+          });
+          await this.saveDocUsage(docModel, resp.usage, convo.id, userId, tenantId);
+          const p = extrairJson((resp.content?.[0] as any)?.text || '');
+          if (p && p.is_documento !== false) parsedResults.push(p);
+        } else {
+          const ai = new OpenAI({ apiKey: openaiKey, timeout: DOC_AI_TIMEOUT_MS, maxRetries: 1 });
+          const blocks = imgData.map((d) => ({ type: 'image_url', image_url: { url: `data:${d.mime};base64,${d.b64}` } }));
+          const resp = await ai.chat.completions.create({
+            model: docModel,
+            messages: [
+              { role: 'system', content: fullPrompt },
+              { role: 'user', content: [{ type: 'text', text: userText }, ...blocks] as any },
+            ],
+            ...buildTokenParam(docModel, DOC_MAX_TOKENS),
+            temperature: 0.1,
+          });
+          await this.saveDocUsage(docModel, resp.usage, convo.id, userId, tenantId);
+          const p = extrairJson(resp.choices[0]?.message?.content || '');
+          if (p && p.is_documento !== false) parsedResults.push(p);
+        }
+      } catch (e: any) {
+        this.logger.warn(`[PROC-IA] Falha ao ler imagem conv=${conversationId}: ${e.message}`);
+      }
+    }
+
+    if (!parsedResults.length) return { preenchidos: [] };
+
+    // Merge: preenche só campo vazio do contato; fontes em ordem (PDF antes da
+    // imagem) — a primeira que trouxer valor vence. Nunca sobrescreve o manual.
+    const val = (v: any) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+    const labels: Record<string, string> = {
+      full_name: 'Nome completo', nationality: 'Nacionalidade', marital_status: 'Estado civil',
+      profession: 'Profissão', rg: 'RG', rg_issuer: 'Órgão emissor', address_cep: 'CEP',
+      address_street: 'Logradouro', address_number: 'Número', address_complement: 'Complemento',
+      address_neighborhood: 'Bairro', address_city: 'Cidade', address_state: 'UF',
+    };
+    const data: any = {};
+    const preenchidos: string[] = [];
+    for (const parsed of parsedResults) {
+      for (const [field, label] of Object.entries(labels)) {
+        if (data[field]) continue; // já veio de fonte anterior (PDF tem prioridade)
+        const v = val(parsed[field]);
+        if (v && !(lead as any)[field]) { data[field] = v; preenchidos.push(label); }
+      }
+      // CPF é campo separado (cpf_cnpj) — guarda só os dígitos.
+      const cpf = typeof parsed.cpf === 'string' ? parsed.cpf.replace(/\D/g, '') : '';
+      if (cpf.length >= 11 && !lead.cpf_cnpj && !data.cpf_cnpj) { data.cpf_cnpj = cpf; preenchidos.push('CPF'); }
+    }
+
+    if (Object.keys(data).length) {
+      await this.prisma.lead.update({ where: { id: lead.id }, data });
+      this.chatGateway.emitConversationsUpdate(tenantId);
+      this.logger.log(`[PROC-IA] Qualificação preenchida conv=${conversationId} campos=${preenchidos.join(',')}`);
+    }
+    return { preenchidos };
+  }
+
+  // ── Config da IA da procuração (admin master) ─────────────────────────────
+  // Só modelo + prompt. As CHAVES de IA são infra global (geridas em outro lugar),
+  // então não ficam aqui.
+  async getAiConfig() {
+    return {
+      docModel: (await this.settings.get('AI_DOC_MODEL')) || 'gpt-4o-mini',
+      docAnthropicModel: (await this.settings.get('AI_DOC_ANTHROPIC_MODEL')) || 'claude-sonnet-4-6',
+      prompt: (await this.settings.get('AI_DOC_PROMPT'))?.trim() || DEFAULT_DOC_PROMPT,
+    };
+  }
+
+  async saveAiConfig(input: { docModel?: string; docAnthropicModel?: string; prompt?: string }) {
+    if (input.docModel !== undefined) await this.settings.set('AI_DOC_MODEL', input.docModel.trim() || 'gpt-4o-mini');
+    if (input.docAnthropicModel !== undefined) await this.settings.set('AI_DOC_ANTHROPIC_MODEL', input.docAnthropicModel.trim() || 'claude-sonnet-4-6');
+    // Vazio = volta pro padrão (getAiConfig faz o fallback).
+    if (input.prompt !== undefined) await this.settings.set('AI_DOC_PROMPT', input.prompt.trim());
+    return this.getAiConfig();
   }
 }

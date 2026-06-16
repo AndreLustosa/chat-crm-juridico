@@ -10,6 +10,7 @@ import { MediaS3Service } from '../media/s3.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { ChatGateway } from '../gateway/chat.gateway';
 import { ContractsService, ContratoVariaveis } from '../contracts/contracts.service';
+import { ProcuracaoService } from '../procuracao/procuracao.service';
 import { SettingsService } from '../settings/settings.service';
 
 // ─── Tipos internos ───────────────────────────────────────────────────────────
@@ -46,6 +47,7 @@ export class ClicksignService {
     private whatsapp: WhatsappService,
     private chatGateway: ChatGateway,
     private contracts: ContractsService,
+    private procuracao: ProcuracaoService,
     private settings: SettingsService,
   ) {
     this.publicApiUrl = process.env.PUBLIC_API_URL ?? '';
@@ -273,6 +275,73 @@ export class ClicksignService {
     return { signingUrl };
   }
 
+  // ── Procuração: gerar o PDF e enviar pro Clicksign (mesmo fluxo do contrato) ─
+
+  async requestSignatureForProcuracao(params: {
+    conversationId: string;
+    tenantId: string;
+  }): Promise<{ signingUrl: string }> {
+    const { conversationId, tenantId } = params;
+    const { baseUrl, token } = await this.getCfg();
+    if (!token)
+      throw new BadRequestException('Clicksign não configurado — acesse Configurações › Contratos & Clicksign');
+
+    const convo = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, tenant_id: tenantId },
+      include: { lead: true },
+    });
+    if (!convo?.lead) throw new BadRequestException('Conversa inválida');
+    const lead = convo.lead;
+    if (!lead.full_name?.trim())
+      throw new BadRequestException('Preencha o NOME COMPLETO do cliente antes de enviar a procuração para assinatura.');
+
+    const clientName = lead.full_name.trim();
+    const clientPhone = lead.phone;
+    const clientEmail = lead.email ?? `${lead.phone.replace(/\D/g, '')}@noreply.placeholder`;
+    const instanceName = convo.instance_name ?? undefined;
+
+    // 1. Gerar o PDF preenchido da procuração (sobre o timbrado, formatação do escritório)
+    const { buffer, nome } = await this.procuracao.generatePdf(lead.id, tenantId);
+    const filename = nome.endsWith('.pdf') ? nome : `${nome}.pdf`;
+
+    // 2-4. Upload + signatário + associação (mesmos helpers do contrato)
+    const documentKey = await this.uploadDocument(buffer, filename);
+    const signerKey = await this.createSigner(clientName, clientEmail, clientPhone);
+    const requestSignatureKey = await this.addSignerToDocument(documentKey, signerKey);
+    const signingUrl = `${baseUrl}/sign/${requestSignatureKey}`;
+
+    // 5. Persistir (document_kind = PROCURACAO — webhook trata igual)
+    const signature = await this.prisma.contractSignature.create({
+      data: {
+        lead_id: lead.id,
+        conversation_id: conversationId,
+        document_kind: 'PROCURACAO',
+        cs_document_key: documentKey,
+        cs_signer_key: signerKey,
+        cs_request_signature_key: requestSignatureKey,
+        signing_url: signingUrl,
+        status: 'PENDENTE',
+      },
+    });
+    this.logger.log(`[Clicksign] Procuração ContractSignature criado: ${signature.id}`);
+
+    // 6. Enviar link via WhatsApp
+    const msg =
+      `📝 *Procuração*\n\n` +
+      `Olá, ${clientName.split(' ')[0]}! Sua procuração está pronta para assinatura digital.\n\n` +
+      `🔒 A assinatura é segura e válida juridicamente (Lei 14.063/2020).\n` +
+      `📱 Você confirmará sua identidade via WhatsApp e selfie.\n\n` +
+      `✍️ *Clique aqui para assinar:*\n${signingUrl}`;
+    try {
+      await this.whatsapp.sendText(clientPhone, msg, instanceName);
+      this.logger.log(`[Clicksign] Link de procuração enviado via WhatsApp para ${clientPhone}`);
+    } catch (e: any) {
+      this.logger.warn(`[Clicksign] Falha ao enviar WhatsApp (procuração): ${e.message}`);
+    }
+
+    return { signingUrl };
+  }
+
   // ── Verificar assinatura HMAC do webhook ──────────────────────────────────
 
   async verifyWebhookSignature(payload: string, signature: string): Promise<boolean> {
@@ -330,8 +399,9 @@ export class ClicksignService {
     });
 
     // Mensagem de tutorial para o cliente via WhatsApp
+    const docLabel = sig.document_kind === 'PROCURACAO' ? 'da sua procuração' : 'do seu contrato';
     const lines = [
-      `⚠️ *Tivemos um problema na etapa de ${errorType}* do seu contrato.`,
+      `⚠️ *Tivemos um problema na etapa de ${errorType}* ${docLabel}.`,
       ``,
       `*Para tentar novamente, siga estas dicas:*`,
       `📱 Use o celular com câmera frontal`,
@@ -508,11 +578,12 @@ export class ClicksignService {
       try {
         // URL pública que serve o arquivo do S3 via endpoint /media/signed/{id}
         const pdfUrl = `${this.publicApiUrl}/contracts/clicksign/signed-pdf/${sig.id}`;
+        const docLabel = sig.document_kind === 'PROCURACAO' ? 'Procuração assinada' : 'Contrato assinado';
         await this.whatsapp.sendMedia(
           clientPhone,
           'document',
           pdfUrl,
-          `📄 Contrato assinado — ${leadName}`,
+          `📄 ${docLabel} — ${leadName}`,
           instanceName,
         );
         this.logger.log(`[Clicksign] PDF assinado enviado para ${clientPhone}`);

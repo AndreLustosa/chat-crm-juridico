@@ -3,6 +3,7 @@ import {
   Post,
   Get,
   Param,
+  Query,
   Body,
   Headers,
   Req,
@@ -18,6 +19,7 @@ import { SkipThrottle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Public } from '../auth/decorators/public.decorator';
 import { ClicksignService } from './clicksign.service';
+import { PrismaService } from '../prisma/prisma.service';
 import type { ContratoVariaveis } from '../contracts/contracts.service';
 
 // ─── DTO ──────────────────────────────────────────────────────────────────────
@@ -61,7 +63,7 @@ export class ClicksignController {
   @Get('status/:conversationId')
   async getStatus(@Param('conversationId') conversationId: string) {
     const sig = await this.clicksign['prisma'].contractSignature.findFirst({
-      where: { conversation_id: conversationId },
+      where: { conversation_id: conversationId, document_kind: { not: 'PROCURACAO' } },
       orderBy: { created_at: 'desc' },
       select: {
         id: true,
@@ -104,6 +106,79 @@ export class ClicksignController {
     const headers: Record<string, string | number> = {
       'Content-Type': contentType,
       'Content-Disposition': `attachment; filename="contrato_assinado_${signatureId}.pdf"`,
+    };
+    if (contentLength) headers['Content-Length'] = contentLength;
+    res.set(headers);
+    stream.pipe(res);
+  }
+}
+
+// ─── Controller de assinatura de PROCURAÇÃO (chat) ─────────────────────────────
+// Mesmo fluxo Clicksign do contrato, escopado ao tenant. Vive aqui (ClicksignModule)
+// pra reusar o ClicksignService sem dependência circular com o ProcuracaoModule.
+
+@UseGuards(JwtAuthGuard)
+@Controller('procuracao/assinatura')
+export class ProcuracaoSignatureController {
+  constructor(
+    private readonly clicksign: ClicksignService,
+    private readonly prisma: PrismaService,
+  ) {}
+
+  private tenant(req: any): string {
+    if (!req.user?.tenant_id) throw new UnauthorizedException('Token sem tenant_id');
+    return req.user.tenant_id;
+  }
+
+  /** POST /procuracao/assinatura — gera a procuração e envia pro cliente assinar (Clicksign). */
+  @Post()
+  async enviar(@Body() body: { conversationId?: string }, @Req() req: any) {
+    if (!body?.conversationId) throw new BadRequestException('conversationId obrigatório');
+    return this.clicksign.requestSignatureForProcuracao({
+      conversationId: body.conversationId,
+      tenantId: this.tenant(req),
+    });
+  }
+
+  /** GET /procuracao/assinatura/status?conversationId= — status da procuração mais recente da conversa. */
+  @Get('status')
+  async status(@Query('conversationId') conversationId: string, @Req() req: any) {
+    const tenantId = this.tenant(req);
+    if (!conversationId) return null;
+    const convo = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, tenant_id: tenantId },
+      select: { id: true },
+    });
+    if (!convo) return null;
+    const sig = await this.prisma.contractSignature.findFirst({
+      where: { conversation_id: conversationId, document_kind: 'PROCURACAO' },
+      orderBy: { created_at: 'desc' },
+      select: { id: true, status: true, signing_url: true, signed_at: true, created_at: true, signed_s3_key: true },
+    });
+    if (!sig) return null;
+    return {
+      id: sig.id,
+      status: sig.status,
+      signing_url: sig.signing_url,
+      signed_at: sig.signed_at,
+      created_at: sig.created_at,
+      has_pdf: !!sig.signed_s3_key,
+    };
+  }
+
+  /** GET /procuracao/assinatura/:id/pdf — baixa a procuração ASSINADA (escopado ao tenant). */
+  @Get(':id/pdf')
+  async pdf(@Param('id') id: string, @Req() req: any, @Res() res: any) {
+    const tenantId = this.tenant(req);
+    const sig = await this.prisma.contractSignature.findFirst({
+      where: { id, document_kind: 'PROCURACAO', lead: { tenant_id: tenantId } },
+      select: { id: true },
+    });
+    if (!sig) throw new BadRequestException('Assinatura não encontrada.');
+    const { stream, contentType, contentLength } = await this.clicksign.getSignedPdfStream(id);
+    const headers: Record<string, string | number> = {
+      'Content-Type': contentType,
+      'Content-Disposition': `attachment; filename="procuracao_assinada_${id}.pdf"`,
     };
     if (contentLength) headers['Content-Length'] = contentLength;
     res.set(headers);

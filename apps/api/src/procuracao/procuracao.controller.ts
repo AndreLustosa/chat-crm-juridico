@@ -59,6 +59,40 @@ export class ProcuracaoController {
     return this.svc.getPreview(leadId, this.tenant(req));
   }
 
+  // Gera a procuração e ENVIA o PDF pro cliente no WhatsApp da conversa.
+  @Post('enviar-whatsapp')
+  async enviarWhatsapp(@Body() body: { conversationId?: string }, @Req() req: any) {
+    if (!body?.conversationId) throw new BadRequestException('conversationId obrigatório');
+    return this.svc.sendViaWhatsapp(body.conversationId, this.tenant(req));
+  }
+
+  // IA lê a foto do documento (RG/CNH) que o cliente mandou na conversa e
+  // preenche a qualificação do contato (só campos vazios; 1x por contato).
+  @Post('auto-preencher')
+  async autoPreencher(@Body() body: { conversationId?: string }, @Req() req: any) {
+    if (!body?.conversationId) throw new BadRequestException('conversationId obrigatório');
+    return this.svc.autoPreencherDocumento(body.conversationId, req.user?.id, this.tenant(req));
+  }
+
+  // Config da IA que lê os documentos da procuração (chaves + modelos + liga/desliga).
+  // RESTRITA AO ADMIN MASTER — mexe em chaves/infra global de IA.
+  @Get('ai-config')
+  @Roles('SUPER_ADMIN')
+  getAiConfig(@Req() req: any) {
+    this.tenant(req); // garante token/tenant válido
+    return this.svc.getAiConfig();
+  }
+
+  @Patch('ai-config')
+  @Roles('SUPER_ADMIN')
+  saveAiConfig(
+    @Body() body: { docModel?: string; docAnthropicModel?: string; prompt?: string },
+    @Req() req: any,
+  ) {
+    this.tenant(req);
+    return this.svc.saveAiConfig(body || {});
+  }
+
   // Gera o PDF preenchido e devolve pra download (botão "baixar/imprimir/enviar").
   @Post('generate')
   async generate(@Body() body: GenerateDto, @Req() req: any, @Res() res: any) {
