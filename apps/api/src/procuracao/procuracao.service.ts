@@ -219,7 +219,7 @@ export class ProcuracaoService {
     ].filter(Boolean).join(', ');
     const now = new Date();
     const vars: Record<string, string> = {
-      nome_completo: lead.full_name || lead.name || '',
+      nome_completo: lead.full_name || '', // só o nome completo (civil), nunca o apelido/WhatsApp
       cpf: fmtCpfCnpj(lead.cpf_cnpj),
       rg: lead.rg || '',
       orgao_emissor: lead.rg_issuer || '',
@@ -318,6 +318,10 @@ export class ProcuracaoService {
       throw new BadRequestException('Configure o texto da procuração em Configurações → Procuração.');
     }
     const { vars } = await this.buildVars(leadId, tenantId);
+    // Nome completo é obrigatório p/ gerar a procuração (não usar apelido/WhatsApp).
+    if (!vars.nome_completo.trim()) {
+      throw new BadRequestException('Preencha o NOME COMPLETO do cliente (na ficha do contato) antes de gerar a procuração.');
+    }
     const style = resolveStyle(t.procuracao_style as any);
     // Nome do arquivo a partir do nome ORIGINAL (sem caixa-alta), sem acento.
     const primeiro = (vars.nome_completo || 'cliente').split(' ')[0]
