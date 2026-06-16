@@ -198,6 +198,8 @@ const DEFAULT_DOC_PROMPT =
   'Retorne JSON com EXATAMENTE estas chaves:\n' +
   '{\n' +
   '  "is_documento": boolean,        // true se há documento de identidade legível\n' +
+  '  "confere_cliente": boolean|null,// true se o nome do documento corresponde ao contato informado; false se for claramente OUTRA pessoa; null se não houver referência ou não der pra ter certeza\n' +
+  '  "nome_no_documento": string|null, // nome que aparece no documento\n' +
   '  "full_name": string|null,       // nome civil completo\n' +
   '  "cpf": string|null,             // só números\n' +
   '  "rg": string|null,              // número do RG (sem o órgão)\n' +
@@ -560,7 +562,8 @@ export class ProcuracaoService {
     conversationId: string,
     userId: string,
     tenantId: string,
-  ): Promise<{ preenchidos: string[]; jaTentou?: boolean; semDocumento?: boolean }> {
+    force = false,
+  ): Promise<{ preenchidos: string[]; jaTentou?: boolean; semDocumento?: boolean; outroDono?: string }> {
     if (!userId) throw new BadRequestException('userId obrigatório');
     const convo = await this.prisma.conversation.findFirst({
       where: { id: conversationId, tenant_id: tenantId },
@@ -573,7 +576,8 @@ export class ProcuracaoService {
     // DEPOIS — assim pega documento enviado mais tarde, sem reanalisar tudo nem
     // regastar IA quando não chegou nada novo.
     const marker: Date | null = (lead as any).qualificacao_ia_em ?? null;
-    const sinceMarker = marker ? { created_at: { gt: marker } } : {};
+    // force (botão "Reler com IA") ignora o marcador e relê o documento mais recente.
+    const sinceMarker = (marker && !force) ? { created_at: { gt: marker } } : {};
     // Imagens (lidas pela OpenAI) e PDFs (lidos pela Claude/Anthropic) — consultas
     // SEPARADAS, cada provedor com a mídia que sabe ler.
     const [imgs, pdfs] = await Promise.all([
@@ -638,7 +642,12 @@ export class ProcuracaoService {
 
     // Prompt COMPLETO (instruções + lista de campos), configurável pelo admin master.
     const fullPrompt = (await this.settings.get('AI_DOC_PROMPT'))?.trim() || DEFAULT_DOC_PROMPT;
-    const userText = 'Documento(s) em anexo para leitura.';
+    // Cross-check: dá pra IA o nome conhecido do contato p/ confirmar que o
+    // documento é mesmo dessa pessoa (campo confere_cliente no JSON).
+    const nomeConhecido = (((lead as any).full_name || lead.name || '') as string).trim();
+    const userText = nomeConhecido
+      ? `Documento(s) em anexo para leitura. O contato desta conversa é conhecido como: "${nomeConhecido}". Confirme se o documento pertence a essa pessoa (campo "confere_cliente").`
+      : 'Documento(s) em anexo para leitura.';
     const extrairJson = (raw: string): any => {
       try { return JSON.parse((raw.match(/\{[\s\S]*\}/) || [raw])[0]); } catch { return null; }
     };
@@ -703,6 +712,15 @@ export class ProcuracaoService {
     }
 
     if (!parsedResults.length) return { preenchidos: [] };
+
+    // Cross-check: se a IA marcou que o documento é de OUTRA pessoa, NÃO preenche —
+    // só avisa (não polui a ficha com dados de terceiro).
+    const mismatch = parsedResults.find((p) => p && p.confere_cliente === false);
+    if (mismatch) {
+      const nomeDoc = (typeof mismatch.nome_no_documento === 'string' && mismatch.nome_no_documento.trim()) ? mismatch.nome_no_documento.trim() : '';
+      this.logger.warn(`[PROC-IA] Documento parece de outra pessoa conv=${conversationId} nome_doc="${nomeDoc}"`);
+      return { preenchidos: [], outroDono: nomeDoc || 'outra pessoa' };
+    }
 
     // Merge: preenche só campo vazio do contato; fontes em ordem (PDF antes da
     // imagem) — a primeira que trouxer valor vence. Nunca sobrescreve o manual.

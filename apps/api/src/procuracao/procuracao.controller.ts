@@ -69,9 +69,9 @@ export class ProcuracaoController {
   // IA lê a foto do documento (RG/CNH) que o cliente mandou na conversa e
   // preenche a qualificação do contato (só campos vazios; 1x por contato).
   @Post('auto-preencher')
-  async autoPreencher(@Body() body: { conversationId?: string }, @Req() req: any) {
+  async autoPreencher(@Body() body: { conversationId?: string; force?: boolean }, @Req() req: any) {
     if (!body?.conversationId) throw new BadRequestException('conversationId obrigatório');
-    return this.svc.autoPreencherDocumento(body.conversationId, req.user?.id, this.tenant(req));
+    return this.svc.autoPreencherDocumento(body.conversationId, req.user?.id, this.tenant(req), !!body.force);
   }
 
   // Config da IA que lê os documentos da procuração (chaves + modelos + liga/desliga).
