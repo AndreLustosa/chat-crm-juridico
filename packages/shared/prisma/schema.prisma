@@ -345,6 +345,7 @@ model Lead {
   marital_status         String? // estado civil
   profession             String? // profissão
   birth_date             String? // data de nascimento (ISO AAAA-MM-DD)
+  mother_name            String? // nome da mãe (filiação)
   rg                     String? // RG
   rg_issuer              String? // órgão emissor do RG (ex.: SSP/AL)
   address_cep            String?

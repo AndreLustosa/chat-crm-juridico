@@ -92,6 +92,16 @@ function fmtNascimento(raw?: string | null): { curto: string; extenso: string } 
   if (mo < 1 || mo > 12 || d < 1 || d > 31) return { curto: s, extenso: s };
   return { curto: `${String(d).padStart(2, '0')}/${String(mo).padStart(2, '0')}/${y}`, extenso: `${d} de ${MESES[mo - 1]} de ${y}` };
 }
+// Capitalização de endereço/nome: "PRAÇA PEDRO DE LIMA SILVA" → "Praça Pedro de
+// Lima Silva". Conectores (de/da/do…) ficam minúsculos; o resto com inicial maiúscula.
+// Corrige documentos/comprovantes que vêm em CAIXA ALTA.
+function titulo(s?: string | null): string {
+  if (!s) return '';
+  const conector = new Set(['de', 'da', 'do', 'das', 'dos', 'e', 'di', 'du', 'del', 'la']);
+  return String(s).trim().toLowerCase().split(/\s+/)
+    .map((w, i) => (i > 0 && conector.has(w)) ? w : (w ? w.charAt(0).toUpperCase() + w.slice(1) : w))
+    .join(' ');
+}
 // ── Mini-motor de layout (pdf-lib só desenha à esquerda) ──────────────────────
 // Replica a formatação do modelo do escritório: corpo JUSTIFICADO, título/data/
 // assinatura (linha curta isolada) CENTRALIZADOS, espaço entre parágrafos e
@@ -224,6 +234,7 @@ const DEFAULT_DOC_PROMPT =
   '  "marital_status": string|null,  // estado civil, se constar\n' +
   '  "profession": string|null,      // profissão, se constar\n' +
   '  "birth_date": string|null,      // data de nascimento no formato AAAA-MM-DD (ex.: 1963-09-25)\n' +
+  '  "mother_name": string|null,     // nome da mãe (filiação no RG/CNH)\n' +
   '  "address_cep": string|null,\n' +
   '  "address_street": string|null,\n' +
   '  "address_number": string|null,\n' +
@@ -296,11 +307,17 @@ export class ProcuracaoService {
   private async buildVars(leadId: string, tenantId: string) {
     const lead = await this.prisma.lead.findFirst({ where: { id: leadId, tenant_id: tenantId } });
     if (!lead) throw new NotFoundException('Contato não encontrado');
+    // Endereço normalizado (comprovante costuma vir em CAIXA ALTA → capitaliza).
+    const logradouro = titulo(lead.address_street);
+    const bairro = titulo(lead.address_neighborhood);
+    const cidade = titulo(lead.address_city);
+    const complemento = titulo(lead.address_complement);
+    const uf = (lead.address_state || '').toUpperCase();
     const enderecoCompleto = [
-      [lead.address_street, lead.address_number].filter(Boolean).join(', '),
-      lead.address_complement,
-      lead.address_neighborhood,
-      [lead.address_city, lead.address_state].filter(Boolean).join('/'),
+      [logradouro, lead.address_number].filter(Boolean).join(', '),
+      complemento,
+      bairro,
+      [cidade, uf].filter(Boolean).join('/'),
       lead.address_cep ? `CEP ${fmtCep(lead.address_cep)}` : '',
     ].filter(Boolean).join(', ');
     const now = new Date();
@@ -316,13 +333,14 @@ export class ProcuracaoService {
       profissao: lead.profession || '',
       data_nascimento: nasc.curto,
       nascimento_extenso: nasc.extenso,
+      nome_mae: titulo((lead as any).mother_name),
       endereco_completo: enderecoCompleto,
-      logradouro: lead.address_street || '',
+      logradouro,
       numero: lead.address_number || '',
-      complemento: lead.address_complement || '',
-      bairro: lead.address_neighborhood || '',
-      cidade: lead.address_city || '',
-      uf: lead.address_state || '',
+      complemento,
+      bairro,
+      cidade,
+      uf,
       cep: fmtCep(lead.address_cep),
       email: lead.email || '',
       telefone: lead.phone || '',
@@ -444,6 +462,7 @@ export class ProcuracaoService {
       rg: '1.234.567', orgao_emissor: 'SSP/AL', rg_completo: '1.234.567 SSP/AL',
       nacionalidade: 'brasileiro(a)', estado_civil: 'casado(a)', profissao: 'comerciante',
       data_nascimento: '25/09/1963', nascimento_extenso: '25 de setembro de 1963',
+      nome_mae: 'Maria de Tal da Silva',
       endereco_completo: 'Rua Exemplo, nº 123, Centro, Arapiraca/AL, CEP 57300-000',
       logradouro: 'Rua Exemplo', numero: '123', complemento: 'Sala 4', bairro: 'Centro',
       cidade: 'Arapiraca', uf: 'AL', cep: '57300-000',
@@ -760,7 +779,7 @@ export class ProcuracaoService {
     const val = (v: any) => (typeof v === 'string' && v.trim() ? v.trim() : null);
     const labels: Record<string, string> = {
       full_name: 'Nome completo', nationality: 'Nacionalidade', marital_status: 'Estado civil',
-      profession: 'Profissão', birth_date: 'Data de nascimento', rg: 'RG', rg_issuer: 'Órgão emissor', address_cep: 'CEP',
+      profession: 'Profissão', birth_date: 'Data de nascimento', mother_name: 'Nome da mãe', rg: 'RG', rg_issuer: 'Órgão emissor', address_cep: 'CEP',
       address_street: 'Logradouro', address_number: 'Número', address_complement: 'Complemento',
       address_neighborhood: 'Bairro', address_city: 'Cidade', address_state: 'UF',
     };

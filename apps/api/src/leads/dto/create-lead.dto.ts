@@ -59,6 +59,7 @@ export class UpdateLeadDto {
   @IsOptional() @IsString() marital_status?: string;
   @IsOptional() @IsString() profession?: string;
   @IsOptional() @IsString() birth_date?: string;
+  @IsOptional() @IsString() mother_name?: string;
   @IsOptional() @IsString() rg?: string;
   @IsOptional() @IsString() rg_issuer?: string;
   @IsOptional() @IsString() address_cep?: string;
