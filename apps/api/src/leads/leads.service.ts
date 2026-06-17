@@ -532,7 +532,7 @@ export class LeadsService {
     id: string,
     data: {
       name?: string; email?: string; cpf_cnpj?: string; tags?: string[];
-      full_name?: string; nationality?: string; marital_status?: string; profession?: string;
+      full_name?: string; nationality?: string; marital_status?: string; profession?: string; birth_date?: string;
       rg?: string; rg_issuer?: string;
       address_cep?: string; address_street?: string; address_number?: string;
       address_complement?: string; address_neighborhood?: string; address_city?: string; address_state?: string;
@@ -592,7 +592,7 @@ export class LeadsService {
     }
 
     // Qualificação (procuração/contrato): texto livre — trim + cap; vazio → null.
-    const QUALI_TEXT = ['full_name', 'nationality', 'marital_status', 'profession', 'rg', 'rg_issuer', 'address_cep', 'address_street', 'address_number', 'address_complement', 'address_neighborhood', 'address_city', 'address_state'] as const;
+    const QUALI_TEXT = ['full_name', 'nationality', 'marital_status', 'profession', 'birth_date', 'rg', 'rg_issuer', 'address_cep', 'address_street', 'address_number', 'address_complement', 'address_neighborhood', 'address_city', 'address_state'] as const;
     for (const f of QUALI_TEXT) {
       if ((data as any)[f] !== undefined) {
         const v = String((data as any)[f] ?? '').trim().slice(0, 200);
