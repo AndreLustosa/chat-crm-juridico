@@ -661,7 +661,27 @@ export class ProcuracaoService {
     ]);
     const comImg = imgs.filter((m) => m.media && (m.media.file_path || m.media.s3_key));
     const comPdf = pdfs.filter((m) => m.media && (m.media.file_path || m.media.s3_key));
-    if (!comImg.length && !comPdf.length) return { preenchidos: [], jaTentou: !!marker, semDocumento: !marker }; // sem custo
+    const temDoc = comImg.length > 0 || comPdf.length > 0;
+
+    // HISTÓRICO de texto da conversa — o cliente pode ter digitado nome/CPF/endereço.
+    // Usado junto com o documento OU sozinho (modo texto) quando o usuário clica "Gerar".
+    const nomeConhecido = (((lead as any).full_name || lead.name || '') as string).trim();
+    const txts = await this.prisma.message.findMany({
+      where: { conversation_id: convo.id, type: 'text', text: { not: null } },
+      orderBy: { created_at: 'desc' }, take: DOC_MAX_HIST_MSGS,
+    });
+    const historico = txts.reverse()
+      .filter((m) => (m.text || '').trim())
+      .map((m) => `${m.direction === 'in' ? 'Cliente' : 'Atendente'}: ${(m.text || '').replace(/\s+/g, ' ').trim()}`)
+      .join('\n').slice(-DOC_MAX_HIST_CHARS);
+    // Modo TEXTO (sem documento): só roda quando o usuário clicou "Gerar" (force) e há texto.
+    const modoTexto = !temDoc && force && !!historico;
+    if (!temDoc && !modoTexto) return { preenchidos: [], jaTentou: !!marker, semDocumento: !marker }; // sem custo
+    const userText = [
+      nomeConhecido ? `O contato desta conversa é conhecido como: "${nomeConhecido}". Confirme se os dados pertencem a essa pessoa (campo "confere_cliente").` : '',
+      historico ? `${temDoc ? 'Considere também o que' : 'Extraia os dados do que'} o cliente informou por texto na conversa:\n${historico}` : '',
+      temDoc ? 'Documento(s) em anexo para leitura.' : '',
+    ].filter(Boolean).join('\n\n');
 
     // Chaves dos provedores. OpenAI e Claude leem imagem; só Claude lê PDF.
     const aiConfig = await this.settings.getAiConfig();
@@ -700,35 +720,18 @@ export class ProcuracaoService {
     } else if (comPdf.length && !anthropicKey) {
       this.logger.warn(`[PROC-IA] PDF na conversa ${conversationId} mas ANTHROPIC_API_KEY ausente — PDF ignorado.`);
     }
-    if (!imgData.length && !pdfBlocks.length) return { preenchidos: [], semDocumento: true }; // nada legível/sem chave
+    if (!imgData.length && !pdfBlocks.length && !modoTexto) return { preenchidos: [], semDocumento: true }; // nada legível/sem chave
 
     // Cost cap por user/tenant antes de qualquer chamada (anti-DoS financeiro).
     await assertAiCostCap(this.prisma, userId, tenantId);
 
     // Marca a tentativa ANTES das chamadas: mesmo que a IA falhe, não reprocessa
     // a mesma mídia (evita loop de custo se o documento for ilegível/IA der erro).
-    await this.prisma.lead.update({ where: { id: lead.id }, data: { qualificacao_ia_em: new Date() } as any });
+    // Modo texto não tem mídia pra "não reprocessar" e só roda no clique "Gerar".
+    if (temDoc) await this.prisma.lead.update({ where: { id: lead.id }, data: { qualificacao_ia_em: new Date() } as any });
 
     // Prompt COMPLETO (instruções + lista de campos), configurável pelo admin master.
     const fullPrompt = (await this.settings.get('AI_DOC_PROMPT'))?.trim() || DEFAULT_DOC_PROMPT;
-    // Cross-check: nome conhecido do contato p/ a IA confirmar que o documento é
-    // dessa pessoa (campo confere_cliente no JSON).
-    const nomeConhecido = (((lead as any).full_name || lead.name || '') as string).trim();
-    // Acesso ao HISTÓRICO de texto da conversa — o cliente pode ter digitado
-    // nome/CPF/endereço. A IA usa isso junto com os documentos.
-    const txts = await this.prisma.message.findMany({
-      where: { conversation_id: convo.id, type: 'text', text: { not: null } },
-      orderBy: { created_at: 'desc' }, take: DOC_MAX_HIST_MSGS,
-    });
-    const historico = txts.reverse()
-      .filter((m) => (m.text || '').trim())
-      .map((m) => `${m.direction === 'in' ? 'Cliente' : 'Atendente'}: ${(m.text || '').replace(/\s+/g, ' ').trim()}`)
-      .join('\n').slice(-DOC_MAX_HIST_CHARS);
-    const userText = [
-      nomeConhecido ? `O contato desta conversa é conhecido como: "${nomeConhecido}". Confirme se o documento pertence a essa pessoa (campo "confere_cliente").` : '',
-      historico ? `Considere também o que o cliente informou por texto na conversa:\n${historico}` : '',
-      'Documento(s) em anexo para leitura.',
-    ].filter(Boolean).join('\n\n');
     const extrairJson = (raw: string): any => {
       try { return JSON.parse((raw.match(/\{[\s\S]*\}/) || [raw])[0]); } catch { return null; }
     };
@@ -789,6 +792,36 @@ export class ProcuracaoService {
         }
       } catch (e: any) {
         this.logger.warn(`[PROC-IA] Falha ao ler imagem conv=${conversationId}: ${e.message}`);
+      }
+    }
+
+    // 3) Texto da conversa SEM documento — só no clique "Gerar" (modoTexto). Usa o
+    // mesmo modelo das fotos (provedor conforme o modelo configurado).
+    if (modoTexto && imgKey) {
+      try {
+        if (imgUsaClaude) {
+          const anthropic = new Anthropic({ apiKey: imgKey, timeout: DOC_AI_TIMEOUT_MS, maxRetries: 1 });
+          const resp = await anthropic.messages.create({
+            model: docModel, max_tokens: DOC_MAX_TOKENS, system: fullPrompt,
+            messages: [{ role: 'user', content: userText }],
+          });
+          await this.saveDocUsage(docModel, resp.usage, convo.id, userId, tenantId);
+          const p = extrairJson((resp.content?.[0] as any)?.text || '');
+          if (p) parsedResults.push(p);
+        } else {
+          const ai = new OpenAI({ apiKey: imgKey, timeout: DOC_AI_TIMEOUT_MS, maxRetries: 1 });
+          const resp = await ai.chat.completions.create({
+            model: docModel,
+            messages: [{ role: 'system', content: fullPrompt }, { role: 'user', content: userText }],
+            ...buildTokenParam(docModel, DOC_MAX_TOKENS),
+            temperature: 0.1,
+          });
+          await this.saveDocUsage(docModel, resp.usage, convo.id, userId, tenantId);
+          const p = extrairJson(resp.choices[0]?.message?.content || '');
+          if (p) parsedResults.push(p);
+        }
+      } catch (e: any) {
+        this.logger.warn(`[PROC-IA] Falha ao ler texto da conversa conv=${conversationId}: ${e.message}`);
       }
     }
 
