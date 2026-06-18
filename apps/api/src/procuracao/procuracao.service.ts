@@ -102,6 +102,23 @@ function titulo(s?: string | null): string {
     .map((w, i) => (i > 0 && conector.has(w)) ? w : (w ? w.charAt(0).toUpperCase() + w.slice(1) : w))
     .join(' ');
 }
+// Campos OBRIGATÓRIOS p/ gerar a procuração — bloqueia a geração se algum faltar
+// (independe do template usar a variável ou não).
+const PROC_OBRIGATORIOS: { key: string; label: string }[] = [
+  { key: 'nome_completo', label: 'Nome completo' },
+  { key: 'cpf', label: 'CPF' },
+  { key: 'nacionalidade', label: 'Nacionalidade' },
+  { key: 'data_nascimento', label: 'Data de nascimento' },
+  { key: 'nome_mae', label: 'Nome da mãe' },
+  { key: 'logradouro', label: 'Logradouro' },
+  { key: 'numero', label: 'Número' },
+  { key: 'bairro', label: 'Bairro' },
+  { key: 'cidade', label: 'Cidade' },
+  { key: 'uf', label: 'UF' },
+];
+function obrigatoriosFaltando(vars: Record<string, string>): { key: string; label: string }[] {
+  return PROC_OBRIGATORIOS.filter((o) => !(vars[o.key] || '').trim());
+}
 // ── Mini-motor de layout (pdf-lib só desenha à esquerda) ──────────────────────
 // Replica a formatação do modelo do escritório: corpo JUSTIFICADO, título/data/
 // assinatura (linha curta isolada) CENTRALIZADOS, espaço entre parágrafos e
@@ -367,11 +384,11 @@ export class ProcuracaoService {
   async getPreview(leadId: string, tenantId: string) {
     const cfg = await this.getConfig(tenantId);
     const { vars } = await this.buildVars(leadId, tenantId);
-    const { text, faltando } = this.fill(cfg.template, vars);
-    // Nome completo é obrigatório p/ gerar (mesmo que o template não use a
-    // variável) — então sempre reportar como faltando se estiver vazio.
-    if (!vars.nome_completo.trim() && !faltando.includes('nome_completo')) faltando.push('nome_completo');
-    return { text, camposFaltando: faltando, hasLetterhead: cfg.hasLetterhead, configurado: !!cfg.template };
+    const { text } = this.fill(cfg.template, vars);
+    // camposFaltando = OBRIGATÓRIOS vazios (o que bloqueia a geração). O texto já
+    // mostra "____" em qualquer variável vazia do modelo (via fill).
+    const camposFaltando = obrigatoriosFaltando(vars).map((o) => o.key);
+    return { text, camposFaltando, hasLetterhead: cfg.hasLetterhead, configurado: !!cfg.template };
   }
 
   // ── Render: timbrado de fundo + texto preenchido por cima ─────────────────
@@ -428,9 +445,10 @@ export class ProcuracaoService {
       throw new BadRequestException('Configure o texto da procuração em Configurações → Procuração.');
     }
     const { vars } = await this.buildVars(leadId, tenantId);
-    // Nome completo é obrigatório p/ gerar a procuração (não usar apelido/WhatsApp).
-    if (!vars.nome_completo.trim()) {
-      throw new BadRequestException('Preencha o NOME COMPLETO do cliente (na ficha do contato) antes de gerar a procuração.');
+    // Campos obrigatórios — bloqueia a geração e diz exatamente o que falta.
+    const faltam = obrigatoriosFaltando(vars);
+    if (faltam.length) {
+      throw new BadRequestException(`Preencha antes de gerar: ${faltam.map((o) => o.label).join(', ')}.`);
     }
     const style = resolveStyle(t.procuracao_style as any);
     // Nome do arquivo a partir do nome ORIGINAL (sem caixa-alta), sem acento.
