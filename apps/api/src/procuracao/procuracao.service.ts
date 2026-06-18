@@ -78,19 +78,30 @@ function fmtCep(v?: string | null): string {
   const d = v.replace(/\D/g, '');
   return d.length === 8 ? `${d.slice(0, 5)}-${d.slice(5)}` : v;
 }
-// Data de nascimento → {curto: "25/09/1963", extenso: "25 de setembro de 1963"}.
-// Aceita ISO (AAAA-MM-DD) ou BR (DD/MM/AAAA); formato desconhecido volta cru.
+// Data de nascimento → {curto: "13/10/1983", extenso: "13 dias do mês de outubro de 1983"}.
+// Aceita ISO (AAAA-MM-DD), BR (DD/MM/AAAA) e 8 dígitos sem separador (DDMMAAAA,
+// ex.: "13101983"); formato desconhecido volta cru.
 function fmtNascimento(raw?: string | null): { curto: string; extenso: string } {
   if (!raw) return { curto: '', extenso: '' };
   const s = String(raw).trim();
   let y = 0, mo = 0, d = 0;
   const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
   const br = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(s);
+  const digits = s.replace(/\D/g, '');
   if (iso) { y = +iso[1]; mo = +iso[2]; d = +iso[3]; }
   else if (br) { d = +br[1]; mo = +br[2]; y = +br[3]; }
+  else if (digits.length === 8) {
+    // 8 dígitos colados: tenta DDMMAAAA (padrão do brasileiro); se inválido, AAAAMMDD.
+    d = +digits.slice(0, 2); mo = +digits.slice(2, 4); y = +digits.slice(4);
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) { y = +digits.slice(0, 4); mo = +digits.slice(4, 6); d = +digits.slice(6); }
+  }
   else return { curto: s, extenso: s };
   if (mo < 1 || mo > 12 || d < 1 || d > 31) return { curto: s, extenso: s };
-  return { curto: `${String(d).padStart(2, '0')}/${String(mo).padStart(2, '0')}/${y}`, extenso: `${d} de ${MESES[mo - 1]} de ${y}` };
+  const diaPalavra = d === 1 ? 'dia' : 'dias';
+  return {
+    curto: `${String(d).padStart(2, '0')}/${String(mo).padStart(2, '0')}/${y}`,
+    extenso: `${d} ${diaPalavra} do mês de ${MESES[mo - 1]} de ${y}`,
+  };
 }
 // Capitalização de endereço/nome: "PRAÇA PEDRO DE LIMA SILVA" → "Praça Pedro de
 // Lima Silva". Conectores (de/da/do…) ficam minúsculos; o resto com inicial maiúscula.
@@ -350,7 +361,7 @@ export class ProcuracaoService {
       profissao: lead.profession || '',
       data_nascimento: nasc.curto,
       nascimento_extenso: nasc.extenso,
-      nome_mae: titulo((lead as any).mother_name),
+      nome_mae: String((lead as any).mother_name || '').trim().toUpperCase(),
       endereco_completo: enderecoCompleto,
       logradouro,
       numero: lead.address_number || '',
@@ -479,8 +490,8 @@ export class ProcuracaoService {
       nome_completo: 'Fulano de Tal da Silva', cpf: '123.456.789-09',
       rg: '1.234.567', orgao_emissor: 'SSP/AL', rg_completo: '1.234.567 SSP/AL',
       nacionalidade: 'brasileiro(a)', estado_civil: 'casado(a)', profissao: 'comerciante',
-      data_nascimento: '25/09/1963', nascimento_extenso: '25 de setembro de 1963',
-      nome_mae: 'Maria de Tal da Silva',
+      data_nascimento: '25/09/1963', nascimento_extenso: '25 dias do mês de setembro de 1963',
+      nome_mae: 'MARIA DE TAL DA SILVA',
       endereco_completo: 'Rua Exemplo, nº 123, Centro, Arapiraca/AL, CEP 57300-000',
       logradouro: 'Rua Exemplo', numero: '123', complemento: 'Sala 4', bairro: 'Centro',
       cidade: 'Arapiraca', uf: 'AL', cep: '57300-000',
