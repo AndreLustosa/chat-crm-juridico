@@ -1062,7 +1062,7 @@ export class TrafegoMutateProcessor extends WorkerHost {
   }
 
   private async removeKeywords(p: RemoveKeywordsPayload): Promise<MutateResult> {
-    return await this.mutate.execute({
+    const result = await this.mutate.execute({
       tenantId: p.tenantId,
       accountId: p.accountId,
       resourceType: 'ad_group_criterion',
@@ -1073,6 +1073,18 @@ export class TrafegoMutateProcessor extends WorkerHost {
       context: p.context,
       operations: p.criterionResourceNames,
     });
+    // Write-through: reflete a remoção no cache local AO remover (sem esperar o sync),
+    // senão a UI relê do cache e a keyword continua aparecendo. Usa a mesma convenção
+    // do tombstone do sync (status=REMOVED) — a listagem filtra REMOVED.
+    if (result.status === 'SUCCESS' && !p.validateOnly) {
+      const ids = ((p.context as any)?.keyword_ids_local ?? []) as string[];
+      if (ids.length) {
+        await this.prisma.trafficKeyword
+          .updateMany({ where: { id: { in: ids } }, data: { status: 'REMOVED' } })
+          .catch((e: any) => this.logger.warn(`[mutate] mirror remove keywords falhou (segue via sync): ${e?.message ?? e}`));
+      }
+    }
+    return result;
   }
 
   /**

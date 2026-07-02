@@ -907,6 +907,7 @@ export class TrafegoService {
       where: {
         tenant_id: tenantId,
         ad_group_id: adGroupId,
+        status: { not: 'REMOVED' }, // esconde removidas (write-through do remove + tombstone do sync)
         ...(typeof opts.negative === 'boolean'
           ? { negative: opts.negative }
           : {}),
