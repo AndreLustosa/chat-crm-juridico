@@ -10,7 +10,7 @@ import { GoogleDriveService } from '../google-drive/google-drive.service';
 import { TrafegoEventsService } from '../trafego/trafego-events.service';
 import { effectiveRole, normalizeRoles } from '../common/utils/permissions.util';
 import { phoneVariants, toCanonicalBrPhone } from '../common/utils/phone';
-import { closeOpenDealsAsWon, closeOpenConversationsForLead } from '../common/utils/close-deals';
+import { closeOpenDealsAsWon, closeOpenDealsAsLost, closeOpenConversationsForLead } from '../common/utils/close-deals';
 import { isValidCPF, isValidCNPJ } from '../common/utils/cpf-cnpj.util';
 import OpenAI from 'openai';
 import { buildTokenParam } from '../common/utils/openai-token-param.util';
@@ -782,8 +782,11 @@ export class LeadsService {
     // Lead PERDIDO → fecha as conversas abertas + desliga a IA (a Sophia não deve
     // seguir conversando lead perdido; e a conversa sai das filas/contadores
     // ativos). Reabre sozinha se o contato voltar a falar (webhook reativa).
+    // Também fecha os deals abertos como PERDIDO — senão a oportunidade ficava
+    // numa coluna ATIVO do kanban pra sempre (aviso de "paradas").
     if (stage === 'PERDIDO') {
       await closeOpenConversationsForLead(this.prisma, this.chatGateway, id, tenantId);
+      await closeOpenDealsAsLost(this.prisma, this.chatGateway, id, tenantId, lossReason ?? null, actorId);
     }
 
     // Registra o histórico de mudança de stage

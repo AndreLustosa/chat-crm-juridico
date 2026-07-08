@@ -63,7 +63,9 @@ export class DealsService {
         skip: (page - 1) * limit,
         take: limit,
         include: {
-          lead: { select: { id: true, name: true, phone: true, profile_picture_url: true } },
+          // is_client no payload: o kanban/aviso de paradas do front filtra
+          // clientes (o funil de captação é só de leads).
+          lead: { select: { id: true, name: true, phone: true, profile_picture_url: true, is_client: true } },
           stage: true,
           funnel: { select: { id: true, key: true, name: true, color: true } },
           owner: { select: { id: true, name: true } },
@@ -119,6 +121,12 @@ export class DealsService {
     if (!lead) throw new NotFoundException('Lead nao encontrado');
     if (lead.tenant_id && lead.tenant_id !== tenantId) {
       throw new ForbiddenException('Lead de outro escritorio');
+    }
+    // Regra de negócio: o funil de captação é só de LEADS. Cliente não entra
+    // no CRM (pedido do André 2026-07-07) — novos casos de cliente vão direto
+    // pra Processos.
+    if ((lead as any).is_client) {
+      throw new BadRequestException('Este contato já é cliente — o funil de captação é só para leads.');
     }
     if (!funnel || funnel.tenant_id !== tenantId) {
       throw new NotFoundException('Funil nao encontrado');
@@ -230,6 +238,14 @@ export class DealsService {
       return deal; // no-op
     }
 
+    // Não REABRIR oportunidade de cliente pra coluna ativa (funil é só de leads —
+    // cliente que precisa de novo caso vai direto pra Processos). Sem isto, mover
+    // um deal GANHO/PERDIDO de cliente de volta pra ATIVO criava um "zumbi"
+    // (some do quadro pelo filtro is_client, mas seguia contando nos KPIs).
+    if (target.type === 'ATIVO' && deal.lead?.is_client) {
+      throw new BadRequestException('Este contato já é cliente — o funil de captação é só para leads.');
+    }
+
     if (target.type === 'PERDIDO' && !input.lostReason?.trim() && !deal.lost_reason) {
       throw new BadRequestException('Motivo da perda obrigatorio ao mover pra PERDIDO');
     }
@@ -335,6 +351,9 @@ export class DealsService {
     const where: Prisma.DealWhereInput = {
       tenant_id: tenantId,
       ...(funnelId ? { funnel_id: funnelId } : {}),
+      // Oportunidade ABERTA de cliente não conta (funil é só de leads) — mesma
+      // regra do quadro, pra os KPIs baterem com o que aparece na tela.
+      NOT: { won_at: null, lost_at: null, lead: { is_client: true } },
     };
     const [total, abertos, ganhos, perdidos, ganhoSum, ganhoMes] = await Promise.all([
       this.prisma.deal.count({ where }),
@@ -371,6 +390,9 @@ export class DealsService {
     const where: Prisma.DealWhereInput = {
       tenant_id: tenantId,
       ...(funnelId ? { funnel_id: funnelId } : {}),
+      // Igual ao stats()/quadro: oportunidade ABERTA de cliente não entra na
+      // distribuição por etapa.
+      NOT: { won_at: null, lost_at: null, lead: { is_client: true } },
     };
 
     const [porEtapaRaw, motivosRaw] = await Promise.all([

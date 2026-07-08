@@ -82,6 +82,80 @@ export async function closeOpenDealsAsWon(
 }
 
 /**
+ * Fecha (marca como PERDIDO) todos os Deals ABERTOS de um lead.
+ *
+ * Gêmeo de closeOpenDealsAsWon, para o lead marcado PERDIDO fora do kanban
+ * (LeadsService.updateStatus → PERDIDO, no atendimento). Sem isto o deal ficava
+ * ABERTO numa coluna ATIVO pra sempre — aparecendo no quadro e no aviso de
+ * "oportunidades paradas" mesmo o lead já estando perdido.
+ *
+ * Cada deal aberto vai pra etapa PERDIDO do próprio funil (lost_at = agora,
+ * lost_reason = motivo da perda do lead) + entrada em DealStageHistory
+ * (moved_via = 'automation'). Sem etapa PERDIDO no funil, só seta lost_at.
+ * Best-effort e idempotente: NUNCA lança; no-op sem deal aberto.
+ */
+export async function closeOpenDealsAsLost(
+  prisma: PrismaService,
+  chatGateway: ChatGateway | null | undefined,
+  leadId: string,
+  tenantId: string | null | undefined,
+  lossReason?: string | null,
+  userId?: string,
+): Promise<number> {
+  try {
+    const open = await prisma.deal.findMany({
+      where: {
+        lead_id: leadId,
+        won_at: null,
+        lost_at: null,
+        ...(tenantId ? { tenant_id: tenantId } : {}),
+      },
+      include: { stage: { select: { name: true } } },
+    });
+    if (open.length === 0) return 0;
+
+    const now = new Date();
+    for (const d of open) {
+      const perdido = await prisma.funnelStage.findFirst({
+        where: { funnel_id: d.funnel_id, type: 'PERDIDO' },
+        orderBy: { order: 'asc' },
+        select: { id: true, name: true },
+      });
+
+      await prisma.deal.update({
+        where: { id: d.id },
+        data: {
+          lost_at: now,
+          ...(lossReason ? { lost_reason: lossReason } : {}),
+          ...(perdido ? { stage_id: perdido.id, stage_entered_at: now } : {}),
+        },
+      });
+
+      await prisma.dealStageHistory
+        .create({
+          data: {
+            deal_id: d.id,
+            from_stage_id: d.stage_id,
+            from_stage_name: d.stage?.name ?? null,
+            to_stage_id: perdido?.id ?? d.stage_id,
+            to_stage_name: perdido?.name ?? d.stage?.name ?? null,
+            moved_by_id: userId ?? null,
+            moved_via: 'automation',
+            reason: 'Lead marcado como perdido no atendimento — deal fechado automaticamente',
+          },
+        })
+        .catch(() => null);
+    }
+
+    chatGateway?.emitConversationsUpdate(tenantId ?? null);
+    return open.length;
+  } catch {
+    // best-effort: nunca quebra o fluxo que marcou o lead como perdido
+    return 0;
+  }
+}
+
+/**
  * Fecha (status=FECHADO) todas as conversas ABERTAS de um lead e DESLIGA a IA.
  *
  * Gêmeo de closeOpenDealsAsWon, mas para a direção OPOSTA — quando o contato SAI
