@@ -528,7 +528,13 @@ export function HighConversionTemplate({
           {/* IMAGE BLOCK (5 Cols) - Absolute on Mobile to allow text to slide down */}
           <div className="absolute inset-x-0 bottom-0 h-[70vh] lg:relative lg:h-full lg:col-span-5 xl:col-span-6 flex items-end justify-center lg:justify-end pointer-events-none z-10 lg:z-20">
             {/* Badge Competência - Desktop Only */}
-            <div className="hidden lg:flex absolute top-[25%] left-[5%] z-20 pointer-events-auto">
+            <div
+              className={`hidden lg:flex absolute z-20 pointer-events-auto ${
+                hero.badgesPosition === "low"
+                  ? "top-[62%] left-[4%]"
+                  : "top-[25%] left-[5%]"
+              }`}
+            >
               <div className="flex items-center gap-3 bg-slate-900/40 backdrop-blur-xl border border-[#A89048]/30 rounded-lg px-6 py-3 shadow-[0_8px_32px_rgba(0,0,0,0.4)] transition-all duration-500 hover:scale-105 hover:border-[#A89048]/60 hover:shadow-[0_0_20px_rgba(168,144,72,0.2)] group cursor-default">
                 <div className="bg-[#A89048]/10 p-2 rounded-full">
                   <Scale size={18} className="text-[#A89048]" />

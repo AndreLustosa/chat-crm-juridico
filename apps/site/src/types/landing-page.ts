@@ -9,6 +9,10 @@ export interface LPHero {
   oab?: string;
   backgroundDesktop?: string;
   backgroundMobile?: string;
+  /** Posicao do badge "Excelencia e Competencia" no hero (desktop).
+   *  "default" (padrao): topo — bom para fotos amplas, como a de /geral/arapiraca.
+   *  "low": mais abaixo — para fotos de retrato, onde o topo cai sobre o rosto. */
+  badgesPosition?: "default" | "low";
 }
 
 export interface LPStep {

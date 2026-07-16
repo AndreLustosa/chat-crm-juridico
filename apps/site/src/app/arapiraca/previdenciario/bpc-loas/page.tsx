@@ -114,6 +114,7 @@ const content: LPTemplateContent = {
     ctaLink: "https://wa.me/5582996390799",
     backgroundDesktop: "/landing/previdenciario-bpc-loas-hero.webp",
     backgroundMobile: "/landing/previdenciario-bpc-loas-hero-mobile.webp",
+    badgesPosition: "low",
   },
   practiceAreas: [
     {
