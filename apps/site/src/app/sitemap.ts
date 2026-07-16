@@ -23,6 +23,31 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: 'monthly',
       priority: 0.9,
     },
+    // Previdenciário / INSS (Arapiraca) — área carro-chefe
+    {
+      url: `${baseUrl}/arapiraca/previdenciario/beneficio-negado`,
+      lastModified: new Date(),
+      changeFrequency: 'monthly',
+      priority: 0.92,
+    },
+    {
+      url: `${baseUrl}/arapiraca/previdenciario/auxilio-doenca`,
+      lastModified: new Date(),
+      changeFrequency: 'monthly',
+      priority: 0.9,
+    },
+    {
+      url: `${baseUrl}/arapiraca/previdenciario/aposentadoria`,
+      lastModified: new Date(),
+      changeFrequency: 'monthly',
+      priority: 0.9,
+    },
+    {
+      url: `${baseUrl}/arapiraca/previdenciario/bpc-loas`,
+      lastModified: new Date(),
+      changeFrequency: 'monthly',
+      priority: 0.9,
+    },
     {
       url: `${baseUrl}/arapiraca/trabalhista/horas-extras`,
       lastModified: new Date(),

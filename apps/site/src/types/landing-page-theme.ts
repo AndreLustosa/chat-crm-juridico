@@ -64,6 +64,10 @@ export interface LPSpecificThemeContent {
   process: LPTemaProcess;
   documents: LPTemaDocuments;
   finalCta: LPTemaCTA;
+  /** Frase da seção do escritório (após "Escritório de Advocacia em CIDADE – UF,").
+   *  Em branco, usa o padrão trabalhista (compat). Permite reusar o template em
+   *  qualquer área (ex.: previdenciário). */
+  officeBlurb?: string;
   footer?: {
     address?: string;
     phones?: string[];

@@ -173,7 +173,7 @@ export function TrabalhistaTemaTemplate({
             />
             <img
               src={hero.mobileBackgroundImage || hero.backgroundImage || "/landing/carteira-trabalho-mobile.webp"}
-              alt="Tema Trabalhista"
+              alt={hero.title}
               className="absolute inset-0 w-full h-full object-cover md:object-center object-top"
               fetchPriority="high"
             />
@@ -404,8 +404,8 @@ export function TrabalhistaTemaTemplate({
                 className="h-16 w-auto object-contain mx-auto md:mx-0 mb-4"
               />
               <p className="text-[#9a9a9a] text-sm leading-relaxed max-w-sm mx-auto md:mx-0">
-                Escritório de Advocacia em {city} – {state}, referência em
-                direitos trabalhistas e na defesa incansável dos trabalhadores.
+                Escritório de Advocacia em {city} – {state}, {content.officeBlurb ||
+                  "referência em direitos trabalhistas e na defesa incansável dos trabalhadores"}.
               </p>
             </div>
             <div className="text-center md:flex md:flex-col md:items-center">
