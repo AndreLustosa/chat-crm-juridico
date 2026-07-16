@@ -669,8 +669,9 @@ export function HighConversionTemplate({
               ? practiceAreas.map((pa) => ({
                   title: pa.title,
                   description: pa.description,
-                  tag: "ESPECIALIDADE",
-                  bgImage: "/landing/Design sem nome (35).webp"
+                  tag: pa.tag ?? "ESPECIALIDADE",
+                  bgImage: pa.bgImage ?? "/landing/Design sem nome (35).webp",
+                  href: pa.href,
                 }))
               : [
                   {

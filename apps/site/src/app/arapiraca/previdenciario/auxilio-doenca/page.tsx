@@ -1,26 +1,24 @@
-import { TrabalhistaTemaTemplate } from "@/components/lp/templates/TrabalhistaTemaTemplate";
+import { HighConversionTemplate } from "@/components/lp/templates/HighConversionTemplate";
 import { LPTracker } from "@/components/lp/LPTracker";
-import { LPSpecificThemeContent } from "@/types/landing-page-theme";
-import { Metadata } from "next";
+import { LPTemplateContent } from "@/types/landing-page";
+import localFont from "next/font/local";
 import Script from "next/script";
+import { Metadata } from "next";
 
 const baseUrl = "https://andrelustosaadvogados.com.br";
 const url = `${baseUrl}/arapiraca/previdenciario/auxilio-doenca`;
 const image = `${baseUrl}/landing/previdenciario-auxilio-doenca-hero.png`;
 
-const title =
-  "Auxílio-doença negado em Arapiraca? Advogado do INSS";
+const title = "Auxílio-doença negado em Arapiraca? Advogado do INSS";
 const description =
-  "Está doente, foi afastado e o INSS negou, cortou ou não marca a perícia? Entenda o auxílio-doença (auxílio por incapacidade temporária) em Arapiraca-AL e como buscar seu benefício.";
+  "INSS negou, cortou ou não marca a perícia do seu auxílio-doença em Arapiraca-AL? Advogado previdenciário analisa o seu caso e busca o benefício.";
 
 export const metadata: Metadata = {
   title,
   description,
   keywords:
     "auxílio-doença Arapiraca, auxílio-doença negado Arapiraca, auxílio por incapacidade temporária, INSS Arapiraca, advogado previdenciário Arapiraca, perícia médica INSS, benefício por incapacidade Arapiraca, alta indevida INSS",
-  alternates: {
-    canonical: url,
-  },
+  alternates: { canonical: url },
   openGraph: {
     title,
     description,
@@ -31,8 +29,8 @@ export const metadata: Metadata = {
     images: [
       {
         url: image,
-        width: 1200,
-        height: 630,
+        width: 1672,
+        height: 941,
         alt: "Advogado de auxílio-doença e INSS em Arapiraca-AL",
       },
     ],
@@ -56,142 +54,138 @@ export const metadata: Metadata = {
   },
 };
 
-const auxilioDoencaContent: LPSpecificThemeContent = {
-  seo: {
-    title,
-    description,
-    keywords:
-      "auxílio-doença Arapiraca, auxílio-doença negado, auxílio por incapacidade temporária, INSS Arapiraca, advogado previdenciário Arapiraca, perícia médica INSS, alta indevida, prorrogação auxílio-doença",
+const neueMontreal = localFont({
+  src: [
+    { path: "../../../../../public/fonts/NeueMontreal-Regular.woff2", weight: "400", style: "normal" },
+    { path: "../../../../../public/fonts/NeueMontreal-Medium.woff2", weight: "500", style: "normal" },
+  ],
+  variable: "--font-neue-montreal",
+  display: "swap",
+});
+
+const displayFont = localFont({
+  src: [{ path: "../../../../../public/fonts/NeueMontreal-Medium.woff2", weight: "500", style: "normal" }],
+  variable: "--font-playfair",
+  display: "swap",
+});
+
+const faqItems = [
+  {
+    question: "O INSS negou meu auxílio-doença mesmo eu estando doente. É comum?",
+    answer:
+      "Sim, é comum a perícia concluir que não há incapacidade mesmo diante de laudos e exames. Quando isso acontece, é possível recorrer administrativamente ou buscar o benefício na Justiça, com perícia médica judicial, reunindo bem a documentação médica que comprova a limitação para o trabalho.",
   },
-  city: "Arapiraca",
-  state: "AL",
+  {
+    question: "Recebi alta da perícia, mas ainda não tenho condições de trabalhar. O que fazer?",
+    answer:
+      "Você pode pedir a prorrogação do benefício dentro do prazo (Pedido de Prorrogação) e, se ainda assim houver alta indevida, questionar a decisão. Reunimos laudos e exames atualizados para demonstrar que a incapacidade persiste.",
+  },
+  {
+    question: "Qual a diferença entre auxílio-doença e aposentadoria por invalidez?",
+    answer:
+      "O auxílio-doença (auxílio por incapacidade temporária) é para quem está temporariamente incapaz e pode se recuperar. Quando a incapacidade é permanente e não há como voltar ao trabalho, o caso pode ser de aposentadoria por incapacidade permanente (antiga aposentadoria por invalidez).",
+  },
+  {
+    question: "Preciso ter contribuído por quanto tempo para ter direito?",
+    answer:
+      "Em regra, é exigida uma carência de 12 contribuições mensais, mas há situações (como acidentes e algumas doenças graves) em que a carência é dispensada. Avaliamos o seu CNIS para confirmar a qualidade de segurado e a carência no seu caso.",
+  },
+  {
+    question: "A perícia do INSS demora e estou sem salário e sem benefício. Dá para agilizar?",
+    answer:
+      "A demora na marcação da perícia é um problema frequente. Dependendo do tempo de espera, é possível pleitear judicialmente a análise do pedido ou a concessão do benefício. Analisamos o seu caso pelo WhatsApp para indicar o caminho.",
+  },
+  {
+    question: "Atende quem mora em Arapiraca e região?",
+    answer:
+      "Sim. Atendemos presencialmente na Rua Francisco Rodrigues Viana, 244, Baixa Grande, Arapiraca-AL, e de forma 100% digital pelo WhatsApp (82) 99639-0799 para toda a região do Agreste e demais estados.",
+  },
+];
+
+const content: LPTemplateContent = {
   hero: {
-    title: "Auxílio-doença negado ou cortado em Arapiraca?",
+    title:
+      "Advogado Previdenciário em Arapiraca – AL\nAuxílio-doença negado ou cortado? Vamos analisar",
     subtitle:
       "Se você está doente, foi afastado do trabalho e o INSS negou o pedido, deu alta indevida ou não marca a perícia, é possível recorrer administrativamente ou buscar o benefício na Justiça.",
+    mobileSubtitle:
+      "INSS negou, cortou ou não marca a perícia do seu auxílio-doença? Analisamos o seu caso pelo WhatsApp.",
     ctaText: "Falar com advogado do INSS",
-    ctaLink: "#",
-    backgroundImage: "/landing/previdenciario-auxilio-doenca-hero.webp",
-    mobileBackgroundImage: "/landing/previdenciario-auxilio-doenca-hero-mobile.webp",
+    ctaLink: "https://wa.me/5582996390799",
+    backgroundDesktop: "/landing/previdenciario-auxilio-doenca-hero.webp",
+    backgroundMobile: "/landing/previdenciario-auxilio-doenca-hero-mobile.webp",
   },
-  problem: {
-    title: "O INSS decidiu, mas você continua sem condições de trabalhar?",
-    description:
-      "O auxílio-doença (hoje chamado auxílio por incapacidade temporária) é devido a quem está temporariamente incapaz para o trabalho. Muitos pedidos são negados ou encerrados mesmo com a pessoa ainda doente.",
-    items: [
-      "O INSS negou o auxílio-doença dizendo que não há incapacidade, mesmo com laudos e exames",
-      "Você recebeu alta da perícia (alta programada), mas ainda não tem condições de voltar ao trabalho",
-      "O benefício foi cortado ou cessado de forma indevida, sem nova avaliação médica adequada",
-      "A perícia médica demora para ser marcada e você está sem salário e sem benefício",
-      "O pedido foi indeferido por suposta falta de carência ou por perda da qualidade de segurado",
-      "Seu quadro é grave e pode ser caso de conversão em aposentadoria por incapacidade permanente",
-    ],
+  practiceAreas: [
+    {
+      iconName: "FileWarning",
+      title: "INSS negou seu benefício",
+      description:
+        "Recurso administrativo e ação judicial contra a negativa ou o corte indevido do INSS.",
+      href: "/arapiraca/previdenciario/beneficio-negado",
+      bgImage: "/landing/previdenciario-beneficio-negado-hero.webp",
+      tag: "PREVIDENCIÁRIO",
+    },
+    {
+      iconName: "ShieldCheck",
+      title: "Aposentadoria",
+      description:
+        "Análise do tempo de contribuição e concessão da aposentadoria pelo INSS no momento certo.",
+      href: "/arapiraca/previdenciario/aposentadoria",
+      bgImage: "/landing/previdenciario-aposentadoria-hero.webp",
+      tag: "PREVIDENCIÁRIO",
+    },
+    {
+      iconName: "HeartHandshake",
+      title: "BPC / LOAS",
+      description:
+        "Benefício assistencial de um salário mínimo para idosos 65+ e pessoas com deficiência de baixa renda.",
+      href: "/arapiraca/previdenciario/bpc-loas",
+      bgImage: "/landing/previdenciario-bpc-loas-hero.webp",
+      tag: "PREVIDENCIÁRIO",
+    },
+  ],
+  sectionLabels: {
+    servicesTag: "OUTRAS ÁREAS DO PREVIDENCIÁRIO",
+    servicesTitle:
+      "Veja também em <span style=\"color:#A89048\">Previdenciário / INSS</span>",
+    servicesDescription:
+      "Além deste tema, o escritório atua em outras demandas de benefícios do INSS em Arapiraca e região do Agreste. Conheça e fale com um advogado pelo WhatsApp.",
+    bannerTitle:
+      "Advocacia Previdenciária <span style=\"color:#A89048\">em Arapiraca-AL</span>",
+    officeTag: "ESCRITÓRIO JURÍDICO EM ARAPIRACA",
+    officeTitle:
+      "Atendimento Presencial em <span style=\"color:#A89048\">Arapiraca-AL</span> e Digital para Todo o Brasil",
+    officeDescription:
+      "<p>O <strong>André Lustosa Advogados</strong> atende em Arapiraca-AL há mais de 10 anos, com atuação dedicada em Direito Previdenciário e nos benefícios do INSS. Nossa sede fica na Rua Francisco Rodrigues Viana, 244, bairro Baixa Grande, Arapiraca-AL.</p><p>Atendemos presencialmente moradores de Arapiraca, Palmeira dos Índios, São Sebastião, Girau do Ponciano, Taquarana e toda a região do Agreste. Também operamos com estrutura 100% digital para clientes em qualquer estado do Brasil.</p>",
+    excellenceTitle: "Atendimento humano, técnico e transparente",
   },
-  rights: {
-    title: "O que pode ser discutido no seu caso de auxílio-doença?",
-    items: [
-      {
-        iconName: "Stethoscope",
-        title: "Perícia médica revista",
-        description:
-          "Análise do laudo pericial do INSS e da documentação médica para questionar conclusões que não refletem sua real condição de saúde.",
-      },
-      {
-        iconName: "HeartPulse",
-        title: "Incapacidade comprovada",
-        description:
-          "Organização de laudos, exames e relatórios que demonstram a incapacidade temporária para o seu trabalho ou atividade habitual.",
-      },
-      {
-        iconName: "CalendarClock",
-        title: "Prorrogação e restabelecimento",
-        description:
-          "Pedido de prorrogação (PP) quando você ainda está incapaz e busca do restabelecimento do benefício encerrado por alta indevida.",
-      },
-      {
-        iconName: "CircleDollarSign",
-        title: "Valores atrasados",
-        description:
-          "Cobrança das parcelas devidas desde a data em que a incapacidade ficou demonstrada, quando reconhecido o direito ao benefício.",
-      },
-      {
-        iconName: "Scale",
-        title: "Recurso e ação judicial",
-        description:
-          "Recurso administrativo à Junta e ao Conselho de Recursos da Previdência Social e, se necessário, ação judicial com perícia determinada pelo juiz.",
-      },
-      {
-        iconName: "ShieldCheck",
-        title: "Conversão em aposentadoria",
-        description:
-          "Avaliação de casos em que a incapacidade se mostra permanente, com pedido de conversão em aposentadoria por incapacidade permanente.",
-      },
-    ],
-  },
-  howHelp: {
-    title: "Como o escritório atua no seu pedido de benefício?",
-    description:
-      "O trabalho começa pela análise da negativa ou da alta do INSS e da sua documentação médica. A partir daí, definimos o caminho mais adequado, seja o recurso administrativo, seja a ação judicial.",
-    items: [
-      "Análise do indeferimento, da carta de concessão ou do motivo da cessação do benefício",
-      "Organização dos laudos, exames, atestados e do histórico de tratamento médico",
-      "Avaliação da carência e da qualidade de segurado na data do início da incapacidade",
-      "Definição da estratégia: pedido de prorrogação, recurso administrativo ou ação judicial",
-    ],
-  },
-  process: {
-    title: "Como funciona o atendimento?",
-    steps: [
-      {
-        num: "1",
-        title: "RELATO DO CASO",
-        description:
-          "Você conta sua doença, o afastamento, o que o INSS decidiu e há quanto tempo está sem trabalhar.",
-      },
-      {
-        num: "2",
-        title: "ANÁLISE DOS REQUISITOS",
-        description:
-          "Verificamos incapacidade, carência e qualidade de segurado, além do motivo da negativa ou da alta.",
-      },
-      {
-        num: "3",
-        title: "ORGANIZAÇÃO DA PROVA MÉDICA",
-        description:
-          "Reunimos laudos, exames, atestados e relatórios que demonstram a incapacidade para o trabalho.",
-      },
-      {
-        num: "4",
-        title: "PLANO DE AÇÃO",
-        description:
-          "Definimos o caminho: prorrogação, recurso administrativo ou ação judicial com perícia.",
-      },
-    ],
-  },
-  documents: {
-    title: "Documentos que ajudam no pedido de auxílio-doença",
-    description:
-      "Você não precisa ter tudo em mãos agora. O importante é reunir o que comprova sua doença e o vínculo com o INSS.",
-    items: [
-      "Documento de identidade, CPF e comprovante de residência",
-      "Carta de indeferimento, comunicação de decisão ou de cessação do INSS",
-      "Laudos médicos, atestados, receitas e relatórios do seu tratamento",
-      "Exames de imagem, laboratoriais e resultados que confirmem o diagnóstico",
-      "Carteira de trabalho, CNIS ou comprovantes de contribuição ao INSS",
-      "Senha do Meu INSS, se possível, para acompanhamento do processo",
-    ],
-  },
-  finalCta: {
-    title: "Está doente e o INSS negou seu auxílio-doença?",
-    ctaText: "FALAR COM ADVOGADO PREVIDENCIÁRIO",
-    ctaLink: "#",
-  },
-  officeBlurb:
-    "com atuação dedicada em Direito Previdenciário e nos benefícios do INSS",
+  steps: [
+    {
+      title: "Análise do seu caso",
+      description:
+        "Você relata a situação pelo WhatsApp e envia laudos, exames e a decisão do INSS que tiver. Com esses documentos, avaliamos o seu caso.",
+    },
+    {
+      title: "Estratégia previdenciária",
+      description:
+        "Avaliamos a incapacidade, a carência e a qualidade de segurado para definir entre o pedido de prorrogação, o recurso no INSS ou a ação judicial.",
+    },
+    {
+      title: "Atuação e acompanhamento",
+      description:
+        "Cuidamos do recurso ou do processo, dos pedidos de perícia médica judicial e mantemos você informado até a decisão final.",
+    },
+  ],
+  faq: faqItems,
   footer: {
     address: "Rua Francisco Rodrigues Viana, 244, Baixa Grande, Arapiraca-AL",
-    phones: ["(82) 99639-0799"],
+    phones: ["82 99639-0799"],
     email: "contato@andrelustosaadvogados.com.br",
+    social: {
+      instagram: "https://www.instagram.com/andrelustosaadvogados/",
+      facebook: "https://www.facebook.com/andrelustosa",
+      linkedin: "",
+    },
   },
 };
 
@@ -221,28 +215,39 @@ export default function AuxilioDoencaPrevidenciarioPage() {
       { "@type": "State", name: "Alagoas" },
     ],
     serviceType: [
-      "Auxílio-doença",
-      "Auxílio por incapacidade temporária",
-      "Benefício por incapacidade negado pelo INSS",
-      "Perícia médica e recurso administrativo",
+      "Auxílio-doença (auxílio por incapacidade temporária)",
+      "Contestação de alta indevida do INSS",
+      "Prorrogação e restabelecimento de benefício por incapacidade",
+      "Aposentadoria por incapacidade permanente",
+      "Ação judicial previdenciária",
       "Direito Previdenciário em Arapiraca",
     ],
   };
 
+  const faqJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: faqItems.map((f) => ({
+      "@type": "Question",
+      name: f.question,
+      acceptedAnswer: { "@type": "Answer", text: f.answer },
+    })),
+  };
+
   return (
-    <main>
+    <div className={`${neueMontreal.variable} ${displayFont.variable} font-sans`}>
       <Script
-        id="json-ld-auxilio-doenca-arapiraca"
+        id="json-ld-auxilio-doenca-previdenciario-arapiraca"
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(legalServiceJsonLd) }}
       />
-      <LPTracker />
-      <TrabalhistaTemaTemplate
-        content={auxilioDoencaContent}
-        whatsappNumber="5582996390799"
-        city="Arapiraca"
-        state="AL"
+      <Script
+        id="json-ld-faq-auxilio-doenca-previdenciario-arapiraca"
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }}
       />
-    </main>
+      <LPTracker />
+      <HighConversionTemplate content={content} whatsappNumber="+5582996390799" />
+    </div>
   );
 }

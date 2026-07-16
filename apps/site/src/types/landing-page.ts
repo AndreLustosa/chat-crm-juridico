@@ -38,6 +38,10 @@ export interface LPPracticeArea {
   description: string;
   colSpan2?: boolean;
   href?: string;
+  /** Imagem de fundo do card (grade dirigida por conteúdo). Sem ela, usa o padrão. */
+  bgImage?: string;
+  /** Selo do card (ex.: "PREVIDENCIÁRIO"). Sem ele, usa "ESPECIALIDADE". */
+  tag?: string;
 }
 
 export interface LPSectionLabels {
