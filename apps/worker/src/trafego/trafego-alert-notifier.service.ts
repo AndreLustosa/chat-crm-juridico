@@ -167,6 +167,7 @@ export class TrafegoAlertNotifierService {
       OVERSPEND: 'Gasto acima do esperado',
       PAUSED_BUT_SPENDING: 'Campanha pausada com gasto',
       NO_DATA: 'Sem dados recentes',
+      SYNC_STALLED: 'Sincronização de tráfego parada',
     };
     return `${emoji} ${labelMap[a.kind] ?? a.kind}`;
   }

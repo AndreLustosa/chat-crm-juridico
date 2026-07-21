@@ -110,6 +110,14 @@ export class TrafegoSyncService extends WorkerHost {
   /** No primeiro sync de uma conta nova, vai buscar 30 dias. */
   private readonly INITIAL_LOOKBACK_DAYS = 30;
 
+  /**
+   * Horas sem sync a partir das quais o watchdog considera o sync "parado".
+   * O sync é DIÁRIO (06:00 Maceió), então uma conta saudável fica no máximo
+   * ~24h desatualizada; 30h dá ~6h de folga após a janela diária para não
+   * gerar falso positivo em conta que sincroniza normalmente.
+   */
+  private readonly STALE_SYNC_HOURS = 30;
+
   constructor(
     private prisma: PrismaService,
     private adsClient: GoogleAdsClientService,
@@ -804,6 +812,24 @@ export class TrafegoSyncService extends WorkerHost {
    * notification-whatsapp.processor (instância por tenant + Evolution).
    */
   private async notifyOwnerDisconnect(account: any, message: string) {
+    const appUrl = process.env.APP_URL || 'https://andrelustosaadvogados.com.br';
+    const conta = account.account_name || account.customer_id || 'sua conta';
+    const text =
+      `⚠️ *Google Ads desconectado*\n\n` +
+      `A conexão de *${conta}* com o Google Ads caiu (token revogado) e o ` +
+      `monitoramento de tráfego parou de sincronizar.\n\n` +
+      `Reconecte para voltar a acompanhar as campanhas:\n` +
+      `${appUrl}/atendimento/marketing/trafego/configuracoes`;
+    await this.sendOwnerWhatsApp(account, text);
+  }
+
+  /**
+   * Envia um WhatsApp ao dono do escritório (Tenant.phone ou, como fallback, o
+   * 1º ADMIN do tenant com telefone), pela instância Evolution do tenant.
+   * Best-effort: se faltar telefone/instância/credenciais, loga e retorna sem
+   * lançar. O POST em si pode lançar — o chamador decide se ignora (.catch).
+   */
+  private async sendOwnerWhatsApp(account: any, text: string): Promise<void> {
     // 1) Número de destino: telefone do escritório (Tenant.phone) ou, como
     //    fallback, o primeiro ADMIN do tenant com telefone cadastrado.
     const tenant = await this.prisma.tenant.findUnique({
@@ -820,7 +846,7 @@ export class TrafegoSyncService extends WorkerHost {
     }
     if (!phone) {
       this.logger.warn(
-        `[TRAFEGO_SYNC] Tenant ${account.tenant_id} sem telefone (Tenant.phone/ADMIN) — não dá pra avisar desconexão por WhatsApp`,
+        `[TRAFEGO_SYNC] Tenant ${account.tenant_id} sem telefone (Tenant.phone/ADMIN) — não dá pra avisar por WhatsApp`,
       );
       return;
     }
@@ -841,27 +867,136 @@ export class TrafegoSyncService extends WorkerHost {
     // 3) Credenciais Evolution.
     const { apiUrl, apiKey } = await this.settings.getEvolutionConfig();
     if (!apiUrl || !apiKey) {
-      this.logger.warn('[TRAFEGO_SYNC] Evolution não configurada — skip aviso de desconexão');
+      this.logger.warn('[TRAFEGO_SYNC] Evolution não configurada — skip aviso');
       return;
     }
 
-    // 4) Mensagem + envio.
-    const appUrl = process.env.APP_URL || 'https://andrelustosaadvogados.com.br';
-    const conta = account.account_name || account.customer_id || 'sua conta';
-    const text =
-      `⚠️ *Google Ads desconectado*\n\n` +
-      `A conexão de *${conta}* com o Google Ads caiu (token revogado) e o ` +
-      `monitoramento de tráfego parou de sincronizar.\n\n` +
-      `Reconecte para voltar a acompanhar as campanhas:\n` +
-      `${appUrl}/atendimento/marketing/trafego/configuracoes`;
-
+    // 4) Envio.
     await axios.post(
       `${apiUrl}/message/sendText/${instanceName}`,
       { number: phone, text },
       { headers: { 'Content-Type': 'application/json', apikey: apiKey }, timeout: 15000 },
     );
     this.logger.log(
-      `[TRAFEGO_SYNC] Aviso de desconexão (Google Ads) enviado por WhatsApp ao tenant ${account.tenant_id}`,
+      `[TRAFEGO_SYNC] WhatsApp enviado ao dono do tenant ${account.tenant_id}`,
+    );
+  }
+
+  // ─── Watchdog de sync (BUG-J: nunca mais 13 dias de silêncio) ────────────
+
+  /**
+   * Watchdog INDEPENDENTE do sync diário: roda 4x ao dia e avisa quando o sync
+   * de uma conta está parado — seja porque a conexão caiu (status ERROR/REVOKED,
+   * que o cron diário PULA) ou porque o last_sync_at ficou velho demais.
+   *
+   * Diferente do aviso de desconexão em recordFailure (que dispara UMA vez, só
+   * na transição ACTIVE→ERROR, e depois silencia), aqui o alerta é RE-EMITIDO
+   * 1x/dia (dedupe diário) até a conta voltar a sincronizar. Foi justamente o
+   * silêncio de ~13 dias que motivou este watchdog. Roda às 03/09/15/21 (offset
+   * do sync das 06:00 pra não competir).
+   */
+  @Cron('0 3,9,15,21 * * *', { timeZone: 'America/Maceio' })
+  async runSyncWatchdog() {
+    await this.cronRunner.run(
+      'trafego-sync-watchdog',
+      10 * 60,
+      async () => {
+        const accounts = await this.prisma.trafficAccount.findMany({
+          include: {
+            tenant: {
+              select: { traffic_settings: { select: { sync_enabled: true } } },
+            },
+          },
+        });
+
+        const now = Date.now();
+        const staleMs = this.STALE_SYNC_HOURS * 60 * 60 * 1000;
+
+        for (const account of accounts) {
+          // Respeita quem desligou o sync de propósito e ignora contas que
+          // ainda nem conectaram (PENDING).
+          const syncEnabled =
+            account.tenant?.traffic_settings?.sync_enabled ?? true;
+          if (!syncEnabled) continue;
+          if (account.status === 'PENDING') continue;
+
+          const disconnected =
+            account.status === 'ERROR' || account.status === 'REVOKED';
+          const reference =
+            account.last_sync_at?.getTime() ??
+            account.created_at?.getTime() ??
+            now;
+          const ageMs = now - reference;
+          const stale = ageMs > staleMs;
+
+          if (!disconnected && !stale) continue; // conta saudável
+
+          const hours = Math.floor(ageMs / (60 * 60 * 1000));
+          const lastSyncLabel = account.last_sync_at
+            ? `${account.last_sync_at.toISOString().slice(0, 16).replace('T', ' ')} UTC`
+            : 'nunca';
+          const conta = account.account_name || account.customer_id || 'a conta';
+
+          const message = disconnected
+            ? `Google Ads desconectado: "${conta}" parou de sincronizar (última sync: ${lastSyncLabel}).${
+                account.last_error
+                  ? ' Motivo: ' + account.last_error.slice(0, 200) + '.'
+                  : ''
+              } Reconecte para voltar a monitorar as campanhas.`
+            : `Sincronização de tráfego parada: "${conta}" sem sync há ${hours}h (última: ${lastSyncLabel}). O monitoramento de Google Ads pode estar cego — verifique.`;
+
+          try {
+            const alertId = await this.alertEvaluator.raiseAccountAlert({
+              tenantId: account.tenant_id,
+              accountId: account.id,
+              kind: 'SYNC_STALLED',
+              severity: 'CRITICAL',
+              message,
+              context: {
+                status: account.status,
+                last_sync_at: account.last_sync_at?.toISOString() ?? null,
+                hours_since: hours,
+                disconnected,
+              },
+            });
+
+            // alertId != null ⇒ 1ª detecção de HOJE (dedupe diário). Notifica
+            // in-app + email e manda WhatsApp — nas próximas horas do mesmo dia
+            // o dedupe retorna null e não repete. No dia seguinte, re-alerta.
+            if (alertId) {
+              await this.alertNotifier
+                .notifyAlerts([alertId])
+                .catch((e) =>
+                  this.logger.warn(
+                    `[TRAFEGO_WATCHDOG] notify in-app/email falhou: ${e?.message}`,
+                  ),
+                );
+              const appUrl =
+                process.env.APP_URL || 'https://andrelustosaadvogados.com.br';
+              const wa =
+                `⚠️ *Monitoramento de tráfego parado*\n\n${message}\n\n` +
+                `${appUrl}/atendimento/marketing/trafego/configuracoes`;
+              await this.sendOwnerWhatsApp(account, wa).catch((e) =>
+                this.logger.warn(
+                  `[TRAFEGO_WATCHDOG] WhatsApp falhou: ${e?.message}`,
+                ),
+              );
+              this.logger.warn(
+                `[TRAFEGO_WATCHDOG] Conta ${account.customer_id} (${account.status}) sem sync há ${hours}h — alerta disparado`,
+              );
+            }
+          } catch (e: any) {
+            this.logger.error(
+              `[TRAFEGO_WATCHDOG] Erro avaliando conta ${account.id}: ${e?.message}`,
+            );
+          }
+        }
+      },
+      {
+        description:
+          'Watchdog: avisa (1x/dia) quando o sync de tráfego está parado',
+        schedule: '0 3,9,15,21 * * *',
+      },
     );
   }
 }

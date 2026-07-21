@@ -521,6 +521,34 @@ export class TrafegoAlertEvaluatorService {
   }
 
   /**
+   * Cria/atualiza um alerta de NÍVEL DE CONTA (sem campanha) com dedupe
+   * diário — reusa a mesma lógica das regras internas (upsertAlert). Usado
+   * pelo watchdog de sync, que roda FORA do fluxo pós-sync (inclusive para
+   * contas em ERROR, que o cron diário pula). Retorna o id se for NOVO hoje
+   * (para notificar 1x/dia), ou null se já existia hoje.
+   */
+  async raiseAccountAlert(params: {
+    tenantId: string;
+    accountId: string;
+    kind: string;
+    severity: 'INFO' | 'WARNING' | 'CRITICAL';
+    message: string;
+    context: Record<string, any>;
+  }): Promise<string | null> {
+    const dateBucket = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    return this.upsertAlert({
+      tenantId: params.tenantId,
+      accountId: params.accountId,
+      campaignId: null,
+      kind: params.kind,
+      severity: params.severity,
+      message: params.message,
+      context: params.context,
+      dateBucket,
+    });
+  }
+
+  /**
    * Upsert idempotente de alerta. Usa dedupe_key (kind + campaign_id +
    * date_bucket) — mesmo alerta no mesmo dia nao gera duplicado.
    *
