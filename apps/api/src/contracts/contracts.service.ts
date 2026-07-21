@@ -208,7 +208,7 @@ export class ContractsService {
 
   // ── 1. Preview: busca dados da conversa e monta variáveis pré-preenchidas ──
 
-  async getPreview(conversationId: string): Promise<{
+  async getPreview(conversationId: string, tenantId?: string): Promise<{
     variaveis: ContratoVariaveis;
     camposFaltando: string[];
   }> {
@@ -216,8 +216,11 @@ export class ContractsService {
     // AiMemory.facts_json. LeadProfile tem menos campos (nome, cpf, phone,
     // email) — campos especificos (nome_mae, city, state, subarea) agora so
     // vem da ficha trabalhista.
-    const convo = await this.prisma.conversation.findUnique({
-      where: { id: conversationId },
+    // findFirst + tenant_id: escopa ao escritório do usuário (não vaza ficha
+    // de conversa de outro tenant). Sem tenantId no token, nega por segurança.
+    if (!tenantId) throw new BadRequestException('Sessão sem escritório');
+    const convo = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, tenant_id: tenantId },
       include: { lead: { include: { profile: true, ficha_trabalhista: true } } },
     });
     if (!convo?.lead) throw new BadRequestException('Conversa inválida');
@@ -421,9 +424,12 @@ export class ContractsService {
     variaveis: ContratoVariaveis,
     publicApiUrl: string,
     senderId?: string,
+    tenantId?: string,
   ): Promise<{ messageId: string; s3Key: string }> {
-    const convo = await this.prisma.conversation.findUnique({
-      where: { id: conversationId },
+    // Escopa ao escritório: impede enviar contrato numa conversa de outro tenant.
+    if (!tenantId) throw new BadRequestException('Sessão sem escritório');
+    const convo = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, tenant_id: tenantId },
       include: { lead: true },
     });
     if (!convo?.lead) throw new BadRequestException('Conversa inválida');

@@ -4,6 +4,7 @@ import {
 } from '@nestjs/common';
 import { IsString, IsObject } from 'class-validator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { ContractsService } from './contracts.service';
 import type { ContratoVariaveis } from './contracts.service';
 
@@ -22,7 +23,10 @@ class DownloadContractDto {
   variaveis: ContratoVariaveis;
 }
 
+// Emissão de contrato é operação de atendimento/jurídico — nunca de
+// ESTAGIARIO/FINANCEIRO. SUPER_ADMIN passa por padrão no RolesGuard global.
 @UseGuards(JwtAuthGuard)
+@Roles('ADMIN', 'ADVOGADO', 'COMERCIAL', 'OPERADOR')
 @Controller('contracts')
 export class ContractsController {
   private readonly logger = new Logger(ContractsController.name);
@@ -32,10 +36,11 @@ export class ContractsController {
   /**
    * GET /contracts/trabalhista/preview?conversationId=X
    * Retorna variáveis pré-preenchidas a partir dos dados do lead/ficha/memória.
+   * Escopado ao tenant do usuário (não vaza ficha de outro escritório).
    */
   @Get('trabalhista/preview')
-  async preview(@Query('conversationId') conversationId: string) {
-    return this.contracts.getPreview(conversationId);
+  async preview(@Query('conversationId') conversationId: string, @Req() req: any) {
+    return this.contracts.getPreview(conversationId, req.user?.tenant_id);
   }
 
   /**
@@ -53,12 +58,14 @@ export class ContractsController {
     const publicApiUrl = `${protocol}://${host}`;
 
     const senderId = (req.user as any)?.userId;
+    const tenantId = (req.user as any)?.tenant_id;
 
     return this.contracts.generateAndSend(
       body.conversationId,
       body.variaveis,
       publicApiUrl,
       senderId,
+      tenantId,
     );
   }
 
