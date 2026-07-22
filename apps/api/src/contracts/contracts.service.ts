@@ -238,7 +238,7 @@ export class ContractsService {
       NOME_MAE: ficha.nome_mae || '___________________',
       NOME_PAI: ficha.nome_pai || '___________________',
       CPF: ficha.cpf || profileFacts.cpf || '___.___.___-__',
-      ENDERECO: ficha.endereco || profileFacts.address || '___________________',
+      ENDERECO: [ficha.logradouro, ficha.numero].filter(Boolean).join(', ') || profileFacts.address || '___________________',
       BAIRRO: ficha.bairro || '___________________',
       CEP: ficha.cep || '__.___-___',
       CIDADE_UF:
@@ -258,7 +258,8 @@ export class ContractsService {
     if (variavelVazia(v.ESTADO_CIVIL) || v.ESTADO_CIVIL === '___________________') camposFaltando.push('Estado civil');
     if (v.DATA_NASCIMENTO.startsWith('_')) camposFaltando.push('Data de nascimento');
     if (variavelVazia(v.NOME_MAE) || v.NOME_MAE === '___________________') camposFaltando.push('Nome da mãe');
-    if (variavelVazia(v.NOME_PAI) || v.NOME_PAI === '___________________') camposFaltando.push('Nome do pai');
+    // Nome do pai é opcional (nem todos têm pai registrado) — não bloqueia; se a
+    // ficha tiver `nome_pai`, entra no documento; senão fica em branco pro advogado.
     if (v.CPF === '___.___.___-__') camposFaltando.push('CPF');
     if (variavelVazia(v.ENDERECO) || v.ENDERECO === '___________________') camposFaltando.push('Endereço');
     if (variavelVazia(v.BAIRRO) || v.BAIRRO === '___________________') camposFaltando.push('Bairro');

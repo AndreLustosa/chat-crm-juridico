@@ -27,6 +27,7 @@ export const FICHA_SECTIONS: FichaSection[] = [
       { key: 'orgao_emissor', label: 'Órgão Emissor', type: 'text', placeholder: 'SSP/AL' },
       { key: 'data_nascimento', label: 'Data de Nascimento', type: 'date', required: true },
       { key: 'nome_mae', label: 'Nome da Mãe', type: 'text', colSpan: 2, required: true },
+      { key: 'nome_pai', label: 'Nome do Pai', type: 'text', colSpan: 2 },
       { key: 'estado_civil', label: 'Estado Civil', type: 'select', options: ['Solteiro(a)', 'Casado(a)', 'Divorciado(a)', 'Viúvo(a)', 'União Estável'], required: true },
       { key: 'nacionalidade', label: 'Nacionalidade', type: 'text', placeholder: 'Brasileira', required: true },
       { key: 'profissao', label: 'Profissão', type: 'text', required: true },

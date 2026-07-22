@@ -333,45 +333,58 @@ export class ProcuracaoService {
 
   // ── Variáveis ({{campos}}) a partir do contato ───────────────────────────
   private async buildVars(leadId: string, tenantId: string) {
-    const lead = await this.prisma.lead.findFirst({ where: { id: leadId, tenant_id: tenantId } });
+    const lead = await this.prisma.lead.findFirst({
+      where: { id: leadId, tenant_id: tenantId },
+      include: { ficha_trabalhista: true },
+    });
     if (!lead) throw new NotFoundException('Contato não encontrado');
+    // A ficha trabalhista serve de FALLBACK: quando o cadastro do lead está vazio,
+    // aproveita o que já foi preenchido na ficha (mesmas informações civis) — assim
+    // o atendente não digita as mesmas coisas duas vezes.
+    const ficha = ((lead as any).ficha_trabalhista?.data as Record<string, any>) || {};
+    const pick = (a: any, b: any): string => {
+      const av = a == null ? '' : String(a).trim();
+      return av || (b == null ? '' : String(b).trim());
+    };
+    const numero = pick(lead.address_number, ficha.numero);
+    const cepRaw = pick(lead.address_cep, ficha.cep);
     // Endereço normalizado (comprovante costuma vir em CAIXA ALTA → capitaliza).
-    const logradouro = titulo(lead.address_street);
-    const bairro = titulo(lead.address_neighborhood);
-    const cidade = titulo(lead.address_city);
+    const logradouro = titulo(pick(lead.address_street, ficha.logradouro));
+    const bairro = titulo(pick(lead.address_neighborhood, ficha.bairro));
+    const cidade = titulo(pick(lead.address_city, ficha.cidade));
     const complemento = titulo(lead.address_complement);
-    const uf = (lead.address_state || '').toUpperCase();
+    const uf = pick(lead.address_state, ficha.estado_uf).toUpperCase();
     const enderecoCompleto = [
-      [logradouro, lead.address_number].filter(Boolean).join(', '),
+      [logradouro, numero].filter(Boolean).join(', '),
       complemento,
       bairro,
       [cidade, uf].filter(Boolean).join('/'),
-      lead.address_cep ? `CEP ${fmtCep(lead.address_cep)}` : '',
+      cepRaw ? `CEP ${fmtCep(cepRaw)}` : '',
     ].filter(Boolean).join(', ');
     const now = new Date();
-    const nasc = fmtNascimento((lead as any).birth_date);
+    const nasc = fmtNascimento(pick((lead as any).birth_date, ficha.data_nascimento));
     const vars: Record<string, string> = {
-      nome_completo: lead.full_name || '', // só o nome completo (civil), nunca o apelido/WhatsApp
-      cpf: fmtCpfCnpj(lead.cpf_cnpj),
-      rg: lead.rg || '',
-      orgao_emissor: lead.rg_issuer || '',
-      rg_completo: [lead.rg, lead.rg_issuer].filter(Boolean).join(' '),
-      nacionalidade: lead.nationality || '',
-      estado_civil: lead.marital_status || '',
-      profissao: lead.profession || '',
+      nome_completo: pick(lead.full_name, ficha.nome_completo), // nome civil, nunca o apelido/WhatsApp
+      cpf: fmtCpfCnpj(pick(lead.cpf_cnpj, ficha.cpf)),
+      rg: pick(lead.rg, ficha.rg),
+      orgao_emissor: pick(lead.rg_issuer, ficha.orgao_emissor),
+      rg_completo: [pick(lead.rg, ficha.rg), pick(lead.rg_issuer, ficha.orgao_emissor)].filter(Boolean).join(' '),
+      nacionalidade: pick(lead.nationality, ficha.nacionalidade),
+      estado_civil: pick(lead.marital_status, ficha.estado_civil),
+      profissao: pick(lead.profession, ficha.profissao),
       data_nascimento: nasc.curto,
       nascimento_extenso: nasc.extenso,
-      nome_mae: String((lead as any).mother_name || '').trim().toUpperCase(),
+      nome_mae: pick((lead as any).mother_name, ficha.nome_mae).toUpperCase(),
       endereco_completo: enderecoCompleto,
       logradouro,
-      numero: lead.address_number || '',
+      numero,
       complemento,
       bairro,
       cidade,
       uf,
-      cep: fmtCep(lead.address_cep),
-      email: lead.email || '',
-      telefone: lead.phone || '',
+      cep: fmtCep(cepRaw),
+      email: pick(lead.email, ficha.email),
+      telefone: pick(lead.phone, ficha.telefone),
       data: now.toLocaleDateString('pt-BR'),
       data_extenso: `${now.getDate()} de ${MESES[now.getMonth()]} de ${now.getFullYear()}`,
     };

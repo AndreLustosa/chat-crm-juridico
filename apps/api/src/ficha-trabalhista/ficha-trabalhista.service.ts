@@ -8,7 +8,7 @@ import OpenAI from 'openai';
 import { buildTokenParam } from '../common/utils/openai-token-param.util';
 
 // Total de campos úteis do formulário (para cálculo de %)
-const TOTAL_FIELDS = 76;
+const TOTAL_FIELDS = 77;
 
 // Campos obrigatórios para finalização (espelha FICHA_SECTIONS com required: true)
 const REQUIRED_FIELDS: { key: string; label: string }[] = [

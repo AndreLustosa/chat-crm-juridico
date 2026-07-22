@@ -4,6 +4,7 @@ export class UpdateFichaDto {
   // Dados Pessoais
   @IsOptional() @IsString() nome_completo?: string;
   @IsOptional() @IsString() nome_mae?: string;
+  @IsOptional() @IsString() nome_pai?: string;
   @IsOptional() @IsString() telefone?: string;
   @IsOptional() @IsString() email?: string;
   @IsOptional() @IsString() cpf?: string;
