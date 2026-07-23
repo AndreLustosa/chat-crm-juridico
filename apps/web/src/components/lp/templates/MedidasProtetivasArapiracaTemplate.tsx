@@ -62,9 +62,9 @@ const services = [
   },
   {
     icon: Clock,
-    title: "Resposta em situação urgente",
+    title: "Orientação em situação urgente",
     description:
-      "Direcionamento rápido quando há risco atual, audiência próxima ou decisão que precisa ser acompanhada.",
+      "Direcionamento pelo WhatsApp quando há risco atual, audiência próxima ou decisão que precisa ser acompanhada.",
   },
 ];
 
@@ -106,9 +106,24 @@ const documents = [
 
 const faq = [
   {
-    question: "Medida protetiva precisa de advogado?",
+    question: "Preciso de advogado para pedir uma medida protetiva?",
     answer:
-      "A mulher pode procurar diretamente a autoridade policial, o Judiciário, a Defensoria ou o Ministério Público. A orientação de um advogado ajuda a organizar documentos, entender riscos, acompanhar decisões e adotar providências jurídicas adequadas.",
+      "A mulher pode procurar diretamente a autoridade policial, o Judiciário, a Defensoria ou o Ministério Público. A orientação de um advogado ajuda a organizar documentos, entender riscos, acompanhar decisões e adotar as providências jurídicas adequadas ao caso.",
+  },
+  {
+    question: "Que tipos de violência podem justificar proteção?",
+    answer:
+      "Além da agressão física, a Lei Maria da Penha abrange violência psicológica, moral, sexual e patrimonial. A análise jurídica identifica quais fatos são relevantes para o pedido ou para o acompanhamento da medida protetiva.",
+  },
+  {
+    question: "Fui alvo de uma medida protetiva. Como funciona a defesa?",
+    answer:
+      "Se você recebeu intimação ou foi atingido por uma medida protetiva, cumpra integralmente a decisão enquanto a defesa avalia o caso. A atuação técnica analisa provas, contexto e fundamentos e organiza os próximos passos, sem prometer resultado.",
+  },
+  {
+    question: "O que fazer se a medida protetiva for descumprida?",
+    answer:
+      "Preserve mensagens, áudios, registros e dados de testemunhas e comunique a autoridade competente. O descumprimento pode gerar consequências ao agressor. A orientação jurídica ajuda a documentar os fatos e a adotar as providências legais cabíveis.",
   },
   {
     question: "O escritório atende casos urgentes em Arapiraca?",
@@ -116,14 +131,9 @@ const faq = [
       "Sim. O atendimento inicial pode ser feito pelo WhatsApp para entender a urgência e orientar os próximos passos. Em perigo imediato, acione a Polícia Militar pelo 190. Para orientação e denúncias, também existe o Ligue 180.",
   },
   {
-    question: "Que tipos de violência podem justificar proteção?",
-    answer:
-      "Além da agressão física, a Lei Maria da Penha abrange violência psicológica, moral, sexual e patrimonial. A análise jurídica identifica quais fatos são relevantes para o pedido ou acompanhamento da medida.",
-  },
-  {
     question: "O atendimento é sigiloso?",
     answer:
-      "Sim. As informações são tratadas com reserva profissional e usadas apenas para análise e condução jurídica do caso.",
+      "Sim. As informações compartilhadas são tratadas com reserva profissional e usadas apenas para a análise e a condução jurídica do caso. O sigilo é um dever da advocacia e vale para o atendimento presencial e pelo WhatsApp.",
   },
 ];
 
@@ -182,16 +192,20 @@ export function MedidasProtetivasArapiracaTemplate() {
           <div className="max-w-2xl">
             <div className="mb-6 inline-flex items-center gap-2 rounded-lg border border-[#a89048]/40 bg-black/45 px-3 py-2 text-xs font-bold uppercase tracking-[0.18em] text-[#d6bd74] backdrop-blur">
               <MapPin size={15} />
-              Arapiraca-AL | Violência doméstica
+              Arapiraca-AL | Lei Maria da Penha
             </div>
             <h1 className="text-[clamp(2.35rem,5.9vw,5.2rem)] font-medium leading-[0.98] tracking-normal text-white">
-              Medida protetiva para proteger você e sua família
+              Advogado para Medidas Protetivas em Arapiraca
             </h1>
             <p className="mt-6 max-w-xl text-[clamp(1rem,1.6vw,1.22rem)] leading-relaxed text-[#d8d2c6]">
-              Atendimento jurídico sigiloso em Arapiraca para mulheres em
-              situação de violência doméstica, ameaças, perseguição ou
-              descumprimento de medida protetiva.
+              Atendimento jurídico sigiloso em Arapiraca para quem precisa
+              requerer proteção pela Lei Maria da Penha e para quem foi alvo de
+              uma medida protetiva e precisa de defesa técnica.
             </p>
+            <div className="mt-5 inline-flex items-center gap-2 rounded-lg border border-[#a89048]/30 bg-black/40 px-3 py-2 text-sm font-semibold text-[#e7d9b0] backdrop-blur">
+              <BadgeCheck size={16} className="text-[#d6bd74]" />
+              André Lustosa — OAB/AL 14209
+            </div>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               <button
                 onClick={openWhatsapp}
@@ -214,6 +228,26 @@ export function MedidasProtetivasArapiracaTemplate() {
               com sigilo.
             </div>
           </div>
+        </div>
+      </section>
+
+      <section className="border-b border-white/10 bg-[#0c0c0c] py-10 md:py-12">
+        <div className="mx-auto max-w-4xl px-5 md:px-8">
+          <p className="text-sm font-bold uppercase tracking-[0.2em] text-[#a89048]">
+            Resposta rápida
+          </p>
+          <p className="mt-4 text-lg leading-relaxed text-[#d8d2c6]">
+            Precisa de{" "}
+            <strong className="text-white">
+              advogado para medida protetiva em Arapiraca-AL
+            </strong>
+            ? O André Lustosa Advogados (André Lustosa — OAB/AL 14209) orienta
+            quem precisa requerer proteção pela Lei Maria da Penha e quem foi
+            alvo de uma medida protetiva e busca defesa técnica. Atende na Rua
+            Francisco Rodrigues Viana, 244, Baixa Grande, de segunda a sexta,
+            das 8h às 18h. Fale pelo WhatsApp (82) 99639-0799 — a primeira
+            conversa é sem compromisso.
+          </p>
         </div>
       </section>
 
@@ -390,6 +424,29 @@ export function MedidasProtetivasArapiracaTemplate() {
           </button>
         </div>
       </section>
+
+      <footer className="border-t border-white/10 bg-[#070707] py-8 text-sm text-[#8f897e]">
+        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 md:flex-row md:items-center md:justify-between md:px-8">
+          <div className="flex flex-col gap-1">
+            <span>
+              © {new Date().getFullYear()} André Lustosa Advogados. André
+              Lustosa — OAB/AL 14209.
+            </span>
+            <span>
+              Rua Francisco Rodrigues Viana, 244, Baixa Grande, Arapiraca-AL ·
+              Seg a Sex, 8h às 18h.
+            </span>
+          </div>
+          <div className="flex items-center gap-5">
+            <a href="/portal" className="transition hover:text-white">
+              Portal do Cliente
+            </a>
+            <a href="/sistema/login" className="transition hover:text-white">
+              Área do Advogado
+            </a>
+          </div>
+        </div>
+      </footer>
 
       <button
         onClick={openWhatsapp}

@@ -6,8 +6,6 @@ import {
   ArrowRight,
   BadgeCheck,
   Ban,
-  CheckCircle2,
-  Clock,
   FileCheck,
   FileSearch,
   LockKeyhole,
@@ -128,6 +126,16 @@ const faq = [
     answer:
       "Sim. O atendimento inicial pode ser feito pelo WhatsApp para entender a urgência, analisar documentos e orientar os próximos passos possíveis.",
   },
+  {
+    question: "É possível pedir a revisão de uma medida protetiva?",
+    answer:
+      "É possível apresentar pedido de revisão ou reavaliação quando houver fatos, provas e fundamentos jurídicos que justifiquem. A análise do seu caso define os caminhos cabíveis. Enquanto a medida estiver vigente, ela precisa ser integralmente cumprida.",
+  },
+  {
+    question: "Qual a importância de ter advogado desde o início?",
+    answer:
+      "A atuação desde o primeiro momento ajuda a organizar provas, orientar depoimentos e evitar atitudes que agravem a situação. A defesa técnica acompanha cada etapa do inquérito ou do processo, do primeiro contato às decisões, com estratégia proporcional ao caso.",
+  },
 ];
 
 function openWhatsapp() {
@@ -187,13 +195,19 @@ export function DefesaHomemMariaDaPenhaArapiracaTemplate() {
               <MapPin size={15} />
               Arapiraca-AL | Defesa na Lei Maria da Penha
             </div>
-            <h1 className="text-[clamp(2.35rem,5.7vw,5.05rem)] font-medium leading-[0.98] tracking-normal text-white">
-              Acusado injustamente? Sua defesa precisa começar agora.
+            <h1 className="text-[clamp(2.15rem,5.2vw,4.6rem)] font-medium leading-[1.02] tracking-normal text-white">
+              Advogado de Defesa para Homens Acusados na Lei Maria da Penha em
+              Arapiraca
             </h1>
+            <p className="mt-4 inline-flex items-center gap-2 rounded-md border border-[#a89048]/30 bg-black/40 px-3 py-1.5 text-xs font-semibold tracking-wide text-[#d6bd74] backdrop-blur">
+              <BadgeCheck size={14} />
+              André Lustosa — OAB/AL 14209
+            </p>
             <p className="mt-6 max-w-xl text-[clamp(1rem,1.55vw,1.2rem)] leading-relaxed text-[#d8d2c6]">
               Atendimento jurídico reservado para homens que receberam
               intimação, medida protetiva ou acusação na Lei Maria da Penha em
-              Arapiraca.
+              Arapiraca. Atuação na defesa técnica, na análise da acusação e no
+              acompanhamento do processo.
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               <button
@@ -216,6 +230,32 @@ export function DefesaHomemMariaDaPenhaArapiracaTemplate() {
               avalia os caminhos jurídicos. Uma atitude impulsiva pode piorar o
               caso.
             </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="border-b border-[#a89048]/20 bg-[#0d1017] py-12 md:py-14">
+        <div className="mx-auto max-w-4xl px-5 md:px-8">
+          <div className="rounded-xl border border-[#a89048]/25 bg-[#12151d] p-6 md:p-8">
+            <p className="text-sm font-bold uppercase tracking-[0.2em] text-[#a89048]">
+              Resposta rápida
+            </p>
+            <p className="mt-4 text-lg leading-relaxed text-[#e4dccb]">
+              Homem acusado ou alvo de medida protetiva na Lei Maria da Penha em
+              Arapiraca pode buscar defesa técnica desde o primeiro momento. Fale
+              pelo WhatsApp para uma primeira conversa sem compromisso e análise
+              do seu caso, com atuação na análise da acusação e no acompanhamento
+              do processo. André Lustosa Advogados — André Lustosa, OAB/AL 14209
+              — Rua Francisco Rodrigues Viana, 244, Baixa Grande, Arapiraca-AL.
+              Seg a Sex, 8h às 18h.
+            </p>
+            <button
+              onClick={openWhatsapp}
+              className="mt-6 inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-[#25d366] px-5 text-sm font-bold text-[#07110b] transition hover:bg-[#2ee273]"
+            >
+              <MessageCircle size={17} />
+              Falar com advogado pelo WhatsApp
+            </button>
           </div>
         </div>
       </section>
@@ -395,13 +435,23 @@ export function DefesaHomemMariaDaPenhaArapiracaTemplate() {
         </div>
       </section>
 
-      <footer className="border-t border-white/10 bg-[#070707] py-8 text-sm text-[#8f897e]">
-        <div className="mx-auto flex max-w-7xl flex-col gap-3 px-5 md:flex-row md:items-center md:justify-between md:px-8">
-          <span>
-            © {new Date().getFullYear()} André Lustosa Advogados. OAB/AL
-            14209.
-          </span>
-          <span>Atuação criminal em Arapiraca e atendimento digital.</span>
+      <footer className="border-t border-white/10 bg-[#070707] py-10 text-sm text-[#8f897e]">
+        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 md:px-8">
+          <div className="space-y-1">
+            <p className="font-semibold text-[#c7c0b3]">
+              André Lustosa Advogados
+            </p>
+            <p>André Lustosa — OAB/AL 14209</p>
+            <p>Rua Francisco Rodrigues Viana, 244, Baixa Grande, Arapiraca-AL</p>
+            <p>Seg a Sex, 8h às 18h — WhatsApp (82) 99639-0799</p>
+          </div>
+          <div className="flex flex-col gap-2 border-t border-white/5 pt-4 md:flex-row md:items-center md:justify-between">
+            <span>
+              © {new Date().getFullYear()} André Lustosa Advogados. OAB/AL
+              14209.
+            </span>
+            <span>Atuação criminal em Arapiraca e atendimento digital.</span>
+          </div>
         </div>
       </footer>
 

@@ -7,17 +7,32 @@ const baseUrl =
   process.env.NEXT_PUBLIC_APP_URL || "https://andrelustosaadvogados.com.br";
 
 const title =
-  "Medida Protetiva em Arapiraca-AL | Violência Doméstica";
+  "Advogado para Medidas Protetivas em Arapiraca-AL | Lei Maria da Penha";
 const description =
-  "Atendimento jurídico sigiloso em Arapiraca-AL para mulheres em situação de violência doméstica, ameaças, perseguição e descumprimento de medida protetiva.";
+  "Advogado para medidas protetivas em Arapiraca-AL na Lei Maria da Penha: orientação para quem precisa requerer proteção e defesa técnica para quem foi alvo de uma medida protetiva. Atendimento sigiloso pelo WhatsApp.";
 const url = `${baseUrl}/arapiraca/criminal/medidas-protetivas`;
 const image = `${baseUrl}/landing/medidas-protetivas-arapiraca-hero.png`;
 
 const faq = [
   {
-    question: "Medida protetiva precisa de advogado?",
+    question: "Preciso de advogado para pedir uma medida protetiva?",
     answer:
-      "A mulher pode procurar diretamente a autoridade policial, o Judiciário, a Defensoria ou o Ministério Público. A orientação de um advogado ajuda a organizar documentos, entender riscos, acompanhar decisões e adotar providências jurídicas adequadas.",
+      "A mulher pode procurar diretamente a autoridade policial, o Judiciário, a Defensoria ou o Ministério Público. A orientação de um advogado ajuda a organizar documentos, entender riscos, acompanhar decisões e adotar as providências jurídicas adequadas ao caso.",
+  },
+  {
+    question: "Que tipos de violência podem justificar proteção?",
+    answer:
+      "Além da agressão física, a Lei Maria da Penha abrange violência psicológica, moral, sexual e patrimonial. A análise jurídica identifica quais fatos são relevantes para o pedido ou para o acompanhamento da medida protetiva.",
+  },
+  {
+    question: "Fui alvo de uma medida protetiva. Como funciona a defesa?",
+    answer:
+      "Se você recebeu intimação ou foi atingido por uma medida protetiva, cumpra integralmente a decisão enquanto a defesa avalia o caso. A atuação técnica analisa provas, contexto e fundamentos e organiza os próximos passos, sem prometer resultado.",
+  },
+  {
+    question: "O que fazer se a medida protetiva for descumprida?",
+    answer:
+      "Preserve mensagens, áudios, registros e dados de testemunhas e comunique a autoridade competente. O descumprimento pode gerar consequências ao agressor. A orientação jurídica ajuda a documentar os fatos e a adotar as providências legais cabíveis.",
   },
   {
     question: "O escritório atende casos urgentes em Arapiraca?",
@@ -25,14 +40,9 @@ const faq = [
       "Sim. O atendimento inicial pode ser feito pelo WhatsApp para entender a urgência e orientar os próximos passos. Em perigo imediato, acione a Polícia Militar pelo 190. Para orientação e denúncias, também existe o Ligue 180.",
   },
   {
-    question: "Que tipos de violência podem justificar proteção?",
-    answer:
-      "Além da agressão física, a Lei Maria da Penha abrange violência psicológica, moral, sexual e patrimonial. A análise jurídica identifica quais fatos são relevantes para o pedido ou acompanhamento da medida.",
-  },
-  {
     question: "O atendimento é sigiloso?",
     answer:
-      "Sim. As informações são tratadas com reserva profissional e usadas apenas para análise e condução jurídica do caso.",
+      "Sim. As informações compartilhadas são tratadas com reserva profissional e usadas apenas para a análise e a condução jurídica do caso. O sigilo é um dever da advocacia e vale para o atendimento presencial e pelo WhatsApp.",
   },
 ];
 
@@ -101,6 +111,12 @@ export default function MedidasProtetivasArapiracaPage() {
     url,
     telephone: "+5582996390799",
     email: "contato@andrelustosa.com.br",
+    founder: {
+      "@type": "Person",
+      name: "André Lustosa",
+      jobTitle: "Advogado",
+      identifier: "OAB/AL 14209",
+    },
     address: {
       "@type": "PostalAddress",
       streetAddress: "Rua Francisco Rodrigues Viana, 244",
@@ -114,6 +130,14 @@ export default function MedidasProtetivasArapiracaPage() {
       latitude: -9.751,
       longitude: -36.66,
     },
+    openingHoursSpecification: [
+      {
+        "@type": "OpeningHoursSpecification",
+        dayOfWeek: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+        opens: "08:00",
+        closes: "18:00",
+      },
+    ],
     areaServed: [
       {
         "@type": "City",
@@ -136,6 +160,7 @@ export default function MedidasProtetivasArapiracaPage() {
       "https://www.instagram.com/andrelustosaadvogados/",
       "https://www.facebook.com/andrelustosa",
     ],
+    dateModified: "2026-07-23",
   };
 
   const webPageJsonLd = {
@@ -146,6 +171,7 @@ export default function MedidasProtetivasArapiracaPage() {
     url,
     inLanguage: "pt-BR",
     primaryImageOfPage: image,
+    dateModified: "2026-07-23",
     isPartOf: {
       "@type": "WebSite",
       name: "André Lustosa Advogados",
@@ -155,6 +181,24 @@ export default function MedidasProtetivasArapiracaPage() {
       "@type": "LegalService",
       name: "Medidas protetivas em Arapiraca",
       serviceType: "Lei Maria da Penha",
+    },
+    author: {
+      "@type": "Person",
+      name: "André Lustosa",
+      jobTitle: "Advogado",
+      identifier: "OAB/AL 14209",
+      description:
+        "André Lustosa (OAB/AL 14209), advogado com atuação em Direito Criminal e na Lei Maria da Penha em Arapiraca-AL.",
+      worksFor: {
+        "@type": "LegalService",
+        name: "André Lustosa Advogados",
+      },
+      address: {
+        "@type": "PostalAddress",
+        addressLocality: "Arapiraca",
+        addressRegion: "AL",
+        addressCountry: "BR",
+      },
     },
   };
 

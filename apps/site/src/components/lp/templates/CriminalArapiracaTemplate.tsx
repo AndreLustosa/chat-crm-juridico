@@ -96,8 +96,8 @@ const steps = [
 
 const trustItems = [
   { text: "Sigilo profissional", icon: Shield },
-  { text: "OAB/AL 14209", icon: BadgeCheck },
-  { text: "Atendimento em urgências", icon: Clock },
+  { text: "André Lustosa — OAB/AL 14209", icon: BadgeCheck },
+  { text: "Retorno rápido pelo WhatsApp", icon: Clock },
 ];
 
 const faq = [
@@ -110,6 +110,21 @@ const faq = [
     question: "O que fazer em caso de prisão em flagrante em Arapiraca?",
     answer:
       "Entre em contato imediatamente com um advogado criminalista. As primeiras horas são importantes para analisar a legalidade da prisão, comunicar familiares e preparar a atuação na audiência de custódia.",
+  },
+  {
+    question: "Como funciona a audiência de custódia?",
+    answer:
+      "A audiência de custódia ocorre logo nas primeiras horas após a prisão, perante o juiz. Nela avalia-se a legalidade da prisão e se ela deve ser mantida, relaxada ou substituída por medidas cautelares. A defesa pode apresentar documentos e requerer o que for cabível ao caso.",
+  },
+  {
+    question: "Posso ficar em silêncio no depoimento ou interrogatório?",
+    answer:
+      "Sim. Permanecer em silêncio é um direito previsto na Constituição e não pode ser usado contra você. Orientar-se com um advogado antes de prestar declarações ajuda a entender o que dizer, o que reservar e como preservar a sua defesa.",
+  },
+  {
+    question: "Como funcionam os honorários advocatícios?",
+    answer:
+      "Os honorários são definidos após a análise do caso, considerando a complexidade, a fase processual e o trabalho envolvido. Na primeira conversa sem compromisso, explicamos as condições e as formas de pagamento com transparência, para que você decida com clareza antes de contratar.",
   },
   {
     question: "O atendimento é sigiloso?",
@@ -181,7 +196,7 @@ export function CriminalArapiracaTemplate() {
               Arapiraca-AL | Direito Criminal
             </div>
             <h1 className="text-[clamp(2.4rem,6vw,5.4rem)] font-medium leading-[0.98] tracking-normal text-white">
-              Advocacia Criminal em Arapiraca
+              Advogado criminalista em Arapiraca
             </h1>
             <p className="mt-6 max-w-xl text-[clamp(1rem,1.6vw,1.25rem)] leading-relaxed text-[#d8d2c6]">
               Atendimento jurídico sigiloso em flagrantes, inquéritos,
@@ -214,6 +229,28 @@ export function CriminalArapiracaTemplate() {
               ))}
             </div>
           </div>
+        </div>
+      </section>
+
+      <section className="border-b border-[#a89048]/20 bg-[#0c0c0c] py-10 md:py-12">
+        <div className="mx-auto max-w-4xl px-5 md:px-8">
+          <p className="text-lg leading-relaxed text-[#d8d2c6]">
+            Foi preso em flagrante, está sob inquérito policial ou responde a
+            processo criminal em Arapiraca? Você pode falar agora com{" "}
+            <strong className="font-semibold text-white">
+              André Lustosa Advogados (OAB/AL 14209)
+            </strong>{" "}
+            pelo WhatsApp e ter a primeira conversa sem compromisso. Atendimento
+            na Rua Francisco Rodrigues Viana, 244, Baixa Grande, Arapiraca-AL, de
+            segunda a sexta, das 8h às 18h.
+          </p>
+          <button
+            onClick={openWhatsapp}
+            className="mt-6 inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-[#25d366] px-6 text-base font-bold text-[#07110b] transition hover:bg-[#2ee273]"
+          >
+            <MessageCircle size={19} />
+            Falar agora pelo WhatsApp
+          </button>
         </div>
       </section>
 
@@ -378,8 +415,8 @@ export function CriminalArapiracaTemplate() {
       <footer className="border-t border-white/10 bg-[#070707] py-8 text-sm text-[#8f897e]">
         <div className="mx-auto flex max-w-7xl flex-col gap-3 px-5 md:flex-row md:items-center md:justify-between md:px-8">
           <span>
-            © {new Date().getFullYear()} André Lustosa Advogados. OAB/AL
-            14209.
+            © {new Date().getFullYear()} André Lustosa Advogados · Responsável:
+            André Lustosa — OAB/AL 14209.
           </span>
           <span>Atendimento presencial em Arapiraca e digital mediante agendamento.</span>
         </div>

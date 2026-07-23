@@ -34,6 +34,16 @@ const faq = [
     answer:
       "Sim. O atendimento inicial pode ser feito pelo WhatsApp para entender a urgência, analisar documentos e orientar os próximos passos possíveis.",
   },
+  {
+    question: "É possível pedir a revisão de uma medida protetiva?",
+    answer:
+      "É possível apresentar pedido de revisão ou reavaliação quando houver fatos, provas e fundamentos jurídicos que justifiquem. A análise do seu caso define os caminhos cabíveis. Enquanto a medida estiver vigente, ela precisa ser integralmente cumprida.",
+  },
+  {
+    question: "Qual a importância de ter advogado desde o início?",
+    answer:
+      "A atuação desde o primeiro momento ajuda a organizar provas, orientar depoimentos e evitar atitudes que agravem a situação. A defesa técnica acompanha cada etapa do inquérito ou do processo, do primeiro contato às decisões, com estratégia proporcional ao caso.",
+  },
 ];
 
 export const metadata: Metadata = {
@@ -129,6 +139,27 @@ export default function DefesaHomemMariaDaPenhaArapiracaPage() {
       "Inquérito policial",
       "Advocacia criminal em Arapiraca",
     ],
+    openingHoursSpecification: [
+      {
+        "@type": "OpeningHoursSpecification",
+        dayOfWeek: [
+          "Monday",
+          "Tuesday",
+          "Wednesday",
+          "Thursday",
+          "Friday",
+        ],
+        opens: "08:00",
+        closes: "18:00",
+      },
+    ],
+    founder: {
+      "@type": "Person",
+      name: "André Lustosa",
+      identifier: "OAB/AL 14209",
+      jobTitle: "Advogado",
+    },
+    dateModified: "2026-07-23",
     sameAs: [
       "https://www.instagram.com/andrelustosaadvogados/",
       "https://www.facebook.com/andrelustosa",
@@ -143,6 +174,13 @@ export default function DefesaHomemMariaDaPenhaArapiracaPage() {
     url,
     inLanguage: "pt-BR",
     primaryImageOfPage: image,
+    dateModified: "2026-07-23",
+    author: {
+      "@type": "Person",
+      name: "André Lustosa",
+      identifier: "OAB/AL 14209",
+      jobTitle: "Advogado",
+    },
     isPartOf: {
       "@type": "WebSite",
       name: "André Lustosa Advogados",

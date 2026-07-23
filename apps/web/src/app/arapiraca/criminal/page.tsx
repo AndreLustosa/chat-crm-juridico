@@ -25,6 +25,21 @@ const faq = [
       "Entre em contato imediatamente com um advogado criminalista. As primeiras horas são importantes para analisar a legalidade da prisão, comunicar familiares e preparar a atuação na audiência de custódia.",
   },
   {
+    question: "Como funciona a audiência de custódia?",
+    answer:
+      "A audiência de custódia ocorre logo nas primeiras horas após a prisão, perante o juiz. Nela avalia-se a legalidade da prisão e se ela deve ser mantida, relaxada ou substituída por medidas cautelares. A defesa pode apresentar documentos e requerer o que for cabível ao caso.",
+  },
+  {
+    question: "Posso ficar em silêncio no depoimento ou interrogatório?",
+    answer:
+      "Sim. Permanecer em silêncio é um direito previsto na Constituição e não pode ser usado contra você. Orientar-se com um advogado antes de prestar declarações ajuda a entender o que dizer, o que reservar e como preservar a sua defesa.",
+  },
+  {
+    question: "Como funcionam os honorários advocatícios?",
+    answer:
+      "Os honorários são definidos após a análise do caso, considerando a complexidade, a fase processual e o trabalho envolvido. Na primeira conversa sem compromisso, explicamos as condições e as formas de pagamento com transparência, para que você decida com clareza antes de contratar.",
+  },
+  {
     question: "O atendimento é sigiloso?",
     answer:
       "Sim. As informações compartilhadas são tratadas com reserva profissional e usadas apenas para a análise jurídica do caso.",
@@ -130,10 +145,23 @@ export default function CriminalArapiracaPage() {
       "Lei de Drogas",
       "Crimes contra o patrimônio",
     ],
+    openingHoursSpecification: {
+      "@type": "OpeningHoursSpecification",
+      dayOfWeek: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+      opens: "08:00",
+      closes: "18:00",
+    },
+    founder: {
+      "@type": "Person",
+      name: "André Lustosa",
+      jobTitle: "Advogado",
+      identifier: "OAB/AL 14209",
+    },
     sameAs: [
       "https://www.instagram.com/andrelustosaadvogados/",
       "https://www.facebook.com/andrelustosa",
     ],
+    dateModified: "2026-07-23",
   };
 
   const webPageJsonLd = {
@@ -144,11 +172,17 @@ export default function CriminalArapiracaPage() {
     url,
     inLanguage: "pt-BR",
     primaryImageOfPage: image,
+    author: {
+      "@type": "Person",
+      name: "André Lustosa",
+      identifier: "OAB/AL 14209",
+    },
     publisher: {
       "@type": "LegalService",
       name: "André Lustosa Advogados",
       url: baseUrl,
     },
+    dateModified: "2026-07-23",
   };
 
   const faqJsonLd = {
