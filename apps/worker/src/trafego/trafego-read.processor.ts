@@ -36,7 +36,10 @@ export type ReadJobInput = {
     | 'suggest_geo_targets'
     // Keyword Planner + Forecast (2026-06-01)
     | 'keyword_ideas'
-    | 'keyword_forecast';
+    | 'keyword_forecast'
+    // Impression Share próprio (2026-07-23) — alternativa suportada ao
+    // Auction Insights de concorrentes (que a Google Ads API não expõe).
+    | 'impression_share';
   params: Record<string, any>;
 };
 
@@ -73,6 +76,8 @@ export class TrafegoReadProcessor extends WorkerHost {
         return await this.experimentResults(customer, params as any);
       case 'customer_settings':
         return await this.customerSettings(customer);
+      case 'impression_share':
+        return await this.impressionShare(customer, params as any);
       case 'suggest_geo_targets':
         return await this.clientSvc.suggestGeoTargets(customer, {
           query: String(params.query ?? ''),
@@ -221,6 +226,189 @@ export class TrafegoReadProcessor extends WorkerHost {
     } catch (e: any) {
       throw new Error(`call_view query falhou: ${e.message}`);
     }
+  }
+
+  /**
+   * Impression Share próprio (2026-07-23).
+   *
+   * A Google Ads API NÃO expõe o Auction Insights de concorrentes (domínios
+   * rivais, overlap, outranking) — o recurso `auction_insight` é gated por
+   * allowlist FECHADO. Esta é a alternativa suportada: a fatia de leilão da
+   * PRÓPRIA conta — quanto das impressões elegíveis você captura e quanto
+   * perde por posição (rank) e por orçamento (budget) — por
+   * campanha / grupo / palavra-chave.
+   *
+   * Defensivo: tenta o set completo de métricas; se a API rejeitar algum
+   * campo naquele nível (budget_lost pode não existir em AD_GROUP), refaz
+   * com o set núcleo. Assim a tool nunca cai por incompatibilidade de campo.
+   */
+  private async impressionShare(
+    customer: any,
+    params: {
+      level?: string;
+      campaign_id?: string;
+      ad_group_id?: string;
+      keyword_criterion_id?: string;
+      date_preset?: string;
+      date_from?: string;
+      date_to?: string;
+    },
+  ) {
+    const level = String(params.level || 'CAMPAIGN').toUpperCase();
+
+    // ── Cláusula de datas ──────────────────────────────────────────────
+    const isDate = (s?: string) => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
+    let dateClause: string;
+    if (isDate(params.date_from) && isDate(params.date_to)) {
+      dateClause = `segments.date BETWEEN '${params.date_from}' AND '${params.date_to}'`;
+    } else {
+      const ALLOWED = new Set([
+        'TODAY', 'YESTERDAY', 'LAST_7_DAYS', 'LAST_14_DAYS', 'LAST_30_DAYS',
+        'THIS_MONTH', 'LAST_MONTH', 'LAST_BUSINESS_WEEK',
+        'THIS_WEEK_SUN_TODAY', 'THIS_WEEK_MON_TODAY',
+        'LAST_WEEK_SUN_SAT', 'LAST_WEEK_MON_SUN',
+      ]);
+      const preset = String(params.date_preset || 'LAST_30_DAYS').toUpperCase();
+      dateClause = `segments.date DURING ${ALLOWED.has(preset) ? preset : 'LAST_30_DAYS'}`;
+    }
+
+    // ── Métricas: núcleo sempre; budget_lost só onde a API aceita ───────
+    const CORE = [
+      'metrics.search_impression_share',
+      'metrics.search_top_impression_share',
+      'metrics.search_absolute_top_impression_share',
+      'metrics.search_rank_lost_impression_share',
+    ];
+    const BUDGET = 'metrics.search_budget_lost_impression_share';
+    const baseMetrics = ['metrics.impressions', 'metrics.clicks'];
+
+    // ── SELECT/FROM/WHERE por nível ────────────────────────────────────
+    let dims: string[];
+    let from: string;
+    const filters: string[] = [dateClause];
+
+    if (level === 'AD_GROUP') {
+      dims = ['ad_group.id', 'ad_group.name', 'ad_group.status', 'campaign.id', 'campaign.name'];
+      from = 'ad_group';
+      filters.push(`campaign.advertising_channel_type = 'SEARCH'`);
+      if (params.campaign_id) filters.push(`campaign.id = ${params.campaign_id}`);
+      if (params.ad_group_id) filters.push(`ad_group.id = ${params.ad_group_id}`);
+    } else if (level === 'KEYWORD') {
+      dims = [
+        'ad_group_criterion.criterion_id',
+        'ad_group_criterion.keyword.text',
+        'ad_group_criterion.keyword.match_type',
+        'ad_group_criterion.status',
+        'ad_group.id', 'ad_group.name', 'campaign.id', 'campaign.name',
+      ];
+      from = 'keyword_view';
+      if (params.campaign_id) filters.push(`campaign.id = ${params.campaign_id}`);
+      if (params.ad_group_id) filters.push(`ad_group.id = ${params.ad_group_id}`);
+      if (params.keyword_criterion_id) {
+        filters.push(`ad_group_criterion.criterion_id = ${params.keyword_criterion_id}`);
+      }
+    } else {
+      // CAMPAIGN (default)
+      dims = ['campaign.id', 'campaign.name', 'campaign.status'];
+      from = 'campaign';
+      filters.push(`campaign.advertising_channel_type = 'SEARCH'`);
+      if (params.campaign_id) filters.push(`campaign.id = ${params.campaign_id}`);
+    }
+
+    // budget_lost existe em campaign/ad_group; NÃO em keyword.
+    const wantBudget = level !== 'KEYWORD';
+
+    const buildQuery = (metrics: string[]) => `
+      SELECT ${[...dims, ...baseMetrics, ...metrics].join(', ')}
+      FROM ${from}
+      WHERE ${filters.join(' AND ')}
+      ORDER BY metrics.impressions DESC
+      LIMIT 200
+    `;
+
+    let rows: any[];
+    let budgetIncluded = wantBudget;
+    try {
+      rows = (await customer.query(buildQuery(wantBudget ? [...CORE, BUDGET] : [...CORE]))) as any[];
+    } catch (e: any) {
+      const msg = String(e?.message ?? '');
+      const fieldIssue = /FIELD|INCOMPATIBLE|UNRECOGNIZED|not.*compatible|PROHIBITED/i.test(msg);
+      if (!fieldIssue) {
+        throw new Error(`impression_share query falhou (${level}): ${msg}`);
+      }
+      // Downgrade: refaz só com o núcleo (sem budget_lost).
+      this.logger.warn(
+        `[impression_share] downgrade p/ núcleo no nível ${level} — campo rejeitado: ${msg}`,
+      );
+      budgetIncluded = false;
+      rows = (await customer.query(buildQuery(CORE))) as any[];
+    }
+
+    // ── Formata linhas (IS vêm como fração 0..1; Google omite quando não há dados) ──
+    const num = (v: any): number | null =>
+      v === undefined || v === null ? null : Math.round(Number(v) * 10000) / 10000;
+
+    const items = rows.map((r) => {
+      const m = r.metrics ?? {};
+      const impressionShare = num(m.search_impression_share);
+      const base = {
+        impressions: Number(m.impressions ?? 0),
+        clicks: Number(m.clicks ?? 0),
+        impression_share: impressionShare,
+        top_impression_share: num(m.search_top_impression_share),
+        absolute_top_impression_share: num(m.search_absolute_top_impression_share),
+        rank_lost_impression_share: num(m.search_rank_lost_impression_share),
+        budget_lost_impression_share: budgetIncluded
+          ? num(m.search_budget_lost_impression_share)
+          : null,
+        insufficient_data: impressionShare === null,
+      };
+      if (level === 'AD_GROUP') {
+        return {
+          level,
+          ad_group_id: r.ad_group?.id ?? null,
+          ad_group_name: r.ad_group?.name ?? null,
+          campaign_id: r.campaign?.id ?? null,
+          campaign_name: r.campaign?.name ?? null,
+          status: r.ad_group?.status ?? null,
+          ...base,
+        };
+      }
+      if (level === 'KEYWORD') {
+        return {
+          level,
+          keyword_criterion_id: r.ad_group_criterion?.criterion_id ?? null,
+          keyword_text: r.ad_group_criterion?.keyword?.text ?? null,
+          match_type: r.ad_group_criterion?.keyword?.match_type ?? null,
+          status: r.ad_group_criterion?.status ?? null,
+          ad_group_id: r.ad_group?.id ?? null,
+          ad_group_name: r.ad_group?.name ?? null,
+          campaign_id: r.campaign?.id ?? null,
+          campaign_name: r.campaign?.name ?? null,
+          ...base,
+        };
+      }
+      return {
+        level,
+        campaign_id: r.campaign?.id ?? null,
+        campaign_name: r.campaign?.name ?? null,
+        status: r.campaign?.status ?? null,
+        ...base,
+      };
+    });
+
+    return {
+      level,
+      date_range: dateClause.replace('segments.date ', ''),
+      budget_lost_available: budgetIncluded,
+      rows: items,
+      total: items.length,
+      note:
+        items.length === 0
+          ? 'Nenhuma linha com dados no período. Verifique os filtros ou amplie o intervalo de datas.'
+          : 'Impression Share é da SUA conta (NÃO é Auction Insights de concorrentes — a Google Ads API não expõe esse relatório). ' +
+            'Linhas com insufficient_data=true não tiveram volume de leilão suficiente para o Google reportar.',
+    };
   }
 
   /**

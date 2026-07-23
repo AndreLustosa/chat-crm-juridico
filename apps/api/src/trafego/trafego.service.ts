@@ -2408,18 +2408,19 @@ export class TrafegoService {
       }
 
       case 'trafego-mutate-remove-extension': {
-        const assetResourceName = raw.asset_id.startsWith('customers/')
-          ? raw.asset_id
-          : `customers/${customerId}/assets/${raw.asset_id}`;
-        return {
-          ...base,
-          assetResourceName,
-          context: {
-            ...base.context,
-            asset_id: raw.asset_id,
-            reason: raw.reason,
-          },
-        };
+        // Google Ads API v23 NAO permite remover Asset (proto AssetOperation so
+        // tem create/update — Asset e imutavel). O antigo AssetService.remove
+        // retornava INVALID_ARGUMENT (bug reportado 23/07/2026). "Remover uma
+        // extensao" = remover os VINCULOS do asset. Orientamos o caller a
+        // desanexar cada vinculo via traffic_detach_extension.
+        throw new HttpException(
+          `Nao da pra remover o Asset ${raw.asset_id} diretamente — a Google Ads API nao permite ` +
+            `(o Asset e imutavel uma vez criado). Para "remover" uma extensao, desanexe os VINCULOS: ` +
+            `pegue os asset_link_resource_name em traffic_list_extensions e chame traffic_detach_extension ` +
+            `para cada vinculo (CampaignAsset/AdGroupAsset/CustomerAsset). O Asset em si fica permanente ` +
+            `na conta, sem custo e sem servir. Ref: AssetOperation (RPC v23) so tem create/update.`,
+          HttpStatus.BAD_REQUEST,
+        );
       }
 
       // ═══════════════════════════════════════════════════════════════════
@@ -3011,6 +3012,37 @@ export class TrafegoService {
     if (/^\d+$/.test(idOrGoogleId)) return idOrGoogleId;
     const ag = await this.requireAdGroup(tenantId, idOrGoogleId);
     return ag.google_ad_group_id;
+  }
+
+  /**
+   * Resolve keyword (UUID interno OU google_criterion_id) -> criterion_id do
+   * Google + google_ad_group_id do grupo. O grupo é necessário pra escopar o
+   * keyword_view, já que criterion_id não é único entre grupos. Usado pelo
+   * Impression Share (2026-07-23).
+   */
+  async resolveKeywordCriterion(
+    tenantId: string,
+    idOrCriterionId: string,
+  ): Promise<{ criterionId: string; adGroupGoogleId?: string }> {
+    const kw = await this.prisma.trafficKeyword.findFirst({
+      where: {
+        tenant_id: tenantId,
+        OR: [{ id: idOrCriterionId }, { google_criterion_id: idOrCriterionId }],
+      },
+      include: { ad_group: { select: { google_ad_group_id: true } } },
+    });
+    if (kw) {
+      return {
+        criterionId: kw.google_criterion_id,
+        adGroupGoogleId: kw.ad_group?.google_ad_group_id,
+      };
+    }
+    // Fallback: se for inteiro puro, assume que já é o criterion_id do Google.
+    if (/^\d+$/.test(idOrCriterionId)) return { criterionId: idOrCriterionId };
+    throw new HttpException(
+      `Keyword ${idOrCriterionId} nao encontrada (passe o UUID interno ou o criterion_id do Google).`,
+      HttpStatus.NOT_FOUND,
+    );
   }
 
   // ─── Bidding Strategy: lookup publico + validacoes ─────────────────────

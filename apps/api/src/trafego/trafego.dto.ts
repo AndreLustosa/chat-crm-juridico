@@ -1366,20 +1366,16 @@ export class AttachExtensionDto {
  * Pra remover o asset, use traffic_remove_extension.
  */
 export class DetachExtensionDto {
+  // Alinhado ao MCP schema + service + worker: o detach remove o VÍNCULO
+  // (CustomerAsset/CampaignAsset/AdGroupAsset), cujo resource_name vem de
+  // traffic_list_extensions. (Antes o DTO exigia asset_id, divergindo do resto
+  // da cadeia e travando a ferramenta — bug reportado em 23/07/2026.)
   @IsString()
-  asset_id!: string;
+  asset_link_resource_name!: string;
 
   @IsString()
   @IsIn(['ACCOUNT', 'CAMPAIGN', 'AD_GROUP'])
   level!: 'ACCOUNT' | 'CAMPAIGN' | 'AD_GROUP';
-
-  @IsString()
-  @IsOptional()
-  campaign_id?: string;
-
-  @IsString()
-  @IsOptional()
-  ad_group_id?: string;
 
   @IsBoolean()
   @IsOptional()

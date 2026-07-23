@@ -29,6 +29,8 @@ export interface LPFooter {
   address?: string;
   phones?: string[];
   email?: string;
+  /** Responsável técnico + inscrição OAB (ex.: "André Lustosa — OAB/AL 14209"). */
+  oab?: string;
   social?: {
     instagram?: string;
     facebook?: string;
@@ -57,6 +59,8 @@ export interface LPSectionLabels {
   officeTitle?: string;
   officeDescription?: string;
   excellenceTitle?: string;
+  /** Quick Answer (SEO/AEO) — resposta direta exibida logo após o hero. */
+  quickAnswer?: string;
 }
 
 export interface LPTemplateContent {

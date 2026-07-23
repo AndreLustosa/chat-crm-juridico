@@ -16,8 +16,6 @@ import {
   Scale,
   ChevronRight,
   ChevronLeft,
-  Menu,
-  X,
   Briefcase,
   ShoppingCart,
   HeartPulse,
@@ -70,7 +68,6 @@ export function HighConversionTemplate({
   onWhatsAppClick,
 }: HighConversionTemplateProps) {
   const { hero, steps = [], faq = [], footer, practiceAreas, sectionLabels } = content;
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -85,7 +82,7 @@ export function HighConversionTemplate({
     {
       title: "Análise de Viabilidade Técnica",
       description:
-        "Nossa equipe de especialistas realiza um diagnóstico profundo das provas e fundamentos, mapeando as chances reais de êxito da sua demanda.",
+        "Nossa equipe realiza um diagnóstico profundo das provas e fundamentos, mapeando as chances reais de êxito da sua demanda.",
       icon: <Search size={48} />,
     },
     {
@@ -97,7 +94,7 @@ export function HighConversionTemplate({
     {
       title: "Estruturação de Tese Individualizada",
       description:
-        "Construímos uma peça jurídica exclusiva, fundamentada na jurisprudência mais recente e em estratégias comprovadas de alta performance.",
+        "Construímos uma peça jurídica individualizada, fundamentada na jurisprudência mais recente e em estratégias bem estruturadas.",
       icon: <FileText size={48} />,
     },
     {
@@ -109,7 +106,7 @@ export function HighConversionTemplate({
     {
       title: "Monitoramento Processual Inteligente",
       description:
-        "Utilizamos tecnologia de ponta para vigilância 24h do seu processo, antecipando movimentações judiciais e garantindo respostas ágeis.",
+        "Utilizamos tecnologia para acompanhamento contínuo do seu processo, antecipando movimentações judiciais e buscando respostas ágeis.",
       icon: <Zap size={48} />,
     },
     {
@@ -121,7 +118,7 @@ export function HighConversionTemplate({
     {
       title: "Instrução e Defesa em Juízo",
       description:
-        "Realizamos uma defesa intransigente em todas as instâncias e audiências, com acompanhamento presencial e técnica oratória de excelência.",
+        "Realizamos a defesa em todas as instâncias e audiências, com acompanhamento presencial e técnica oratória cuidadosa.",
       icon: <ShieldCheck size={48} />,
     },
     {
@@ -153,13 +150,13 @@ export function HighConversionTemplate({
       question:
         "O escritório atende apenas clientes residentes em Arapiraca?",
       answer:
-        "Não. Embora tenhamos nossa base em Arapiraca, atendemos com a mesma excelência em todo o Agreste, Sertão e demais regiões de Alagoas, além de possuirmos estrutura para representação jurídica em âmbito nacional através do nosso sistema 100% digital.",
+        "Não. Embora tenhamos nossa base em Arapiraca, atendemos com a mesma dedicação em todo o Agreste, Sertão e demais regiões de Alagoas, além de possuirmos estrutura para representação jurídica em âmbito nacional através do nosso sistema 100% digital.",
     },
     {
       question:
         "Quais áreas do direito o escritório atende nesta unidade?",
       answer:
-        "Atuamos de forma multidisciplinar (Geral), com especialistas prontos para defender seus interesses em Direito Civil, Família e Sucessões, Direito do Trabalho, Consumidor e demandas de reparação de danos (Indenizações).",
+        "Atuamos de forma multidisciplinar (Geral), com advogados prontos para defender seus interesses em Direito Civil, Família e Sucessões, Direito do Trabalho, Consumidor e demandas de reparação de danos (Indenizações).",
     },
     {
       question:
@@ -175,7 +172,7 @@ export function HighConversionTemplate({
     },
     {
       question:
-        "O escritório possui advogados especialistas locais que conhecem o judiciário de Alagoas?",
+        "O escritório possui advogados locais que conhecem o judiciário de Alagoas?",
       answer:
         "Sim. Nossa equipe é composta por advogados que residem e atuam diariamente nas comarcas do interior de Alagoas, o que garante um conhecimento profundo dos trâmites e particularidades do judiciário local.",
     },
@@ -183,7 +180,7 @@ export function HighConversionTemplate({
       question:
         "Quais são os diferenciais do André Lustosa Advogados frente aos escritórios tradicionais da região?",
       answer:
-        "Unimos o acolhimento humano e a proximidade do escritório local com a tecnologia de ponta dos grandes centros, garantindo agilidade no protocolo, acompanhamento 24h por sistema e uma comunicação clara e direta.",
+        "Unimos o acolhimento humano e a proximidade do escritório local com a tecnologia dos grandes centros, buscando agilidade no protocolo, acompanhamento contínuo por sistema e uma comunicação clara e direta.",
     },
     {
       question:
@@ -201,7 +198,7 @@ export function HighConversionTemplate({
       question:
         "Como faço para iniciar meu caso imediatamente em Arapiraca?",
       answer:
-        "Basta clicar no botão de atendimento digital nesta página. Você será conectado à nossa triagem estratégica, que realizará o diagnóstico inicial do seu caso e agendará sua consultoria com o especialista responsável.",
+        "Basta clicar no botão de atendimento digital nesta página. Você será conectado à nossa triagem, que realizará o diagnóstico inicial do seu caso e agendará sua consultoria com o advogado responsável.",
     },
   ];
 
@@ -243,11 +240,12 @@ export function HighConversionTemplate({
 
   return (
     <div className="min-h-screen bg-white text-slate-900 font-sans overflow-x-hidden">
+      {/* Topo enxuto (anti-vazamento de funil): logo + 1 CTA de WhatsApp.
+          Portal do Cliente / Área do Advogado ficam só no rodapé, discretos. */}
       <nav className="absolute top-0 left-0 right-0 z-50 pointer-events-none transition-all duration-300">
         <div className="mx-auto w-[90vw] lg:w-[min(90rem,80vw)] px-4 sm:px-6 lg:px-8 flex items-center justify-between pointer-events-auto pt-6">
-          {/* Desktop & Tablet: Full Unified Bar */}
-          <div className="hidden md:flex flex-1 items-center justify-between bg-[#0A0A0A]/80 backdrop-blur-xl rounded-2xl border border-[#A89048]/30 py-4 px-8 shadow-[0_8px_32px_rgba(0,0,0,0.6)] transition-all duration-300 hover:bg-[#0A0A0A]/90">
-            {/* Logo - Now as a Scroll-to-Top Button */}
+          <div className="flex flex-1 items-center justify-between bg-[#0A0A0A]/80 backdrop-blur-xl rounded-2xl border border-[#A89048]/30 py-3 md:py-4 px-4 md:px-8 shadow-[0_8px_32px_rgba(0,0,0,0.6)] transition-all duration-300 hover:bg-[#0A0A0A]/90">
+            {/* Logo - Scroll-to-Top */}
             <button
               onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
               className="flex items-center hover:opacity-80 transition-opacity cursor-pointer focus:outline-none"
@@ -255,141 +253,25 @@ export function HighConversionTemplate({
             >
               <Image
                 src="/landing/logo_andre_lustosa_transparente.webp"
-                alt="André Lustosa Advogado"
+                alt="André Lustosa Advogados"
                 width={220}
                 height={60}
-                className="h-10 lg:h-12 w-auto object-contain"
+                className="h-9 md:h-10 lg:h-12 w-auto object-contain"
               />
             </button>
 
-            {/* Right Side Group: Menu + CTA */}
-            <div className="flex items-center gap-10">
-              {/* Desktop Menu */}
-              <div className="flex items-center gap-6 mr-4">
-                <button
-                  onClick={() =>
-                    document
-                      .getElementById("areas")
-                      ?.scrollIntoView({ behavior: "smooth" })
-                  }
-                  className="text-[11px] font-bold text-slate-300 hover:text-[#FAFAFA] transition-colors uppercase tracking-widest px-2"
-                >
-                  Serviços
-                </button>
-                <button
-                  onClick={() =>
-                    document
-                      .getElementById("office")
-                      ?.scrollIntoView({ behavior: "smooth" })
-                  }
-                  className="text-[11px] font-bold text-slate-300 hover:text-[#FAFAFA] transition-colors uppercase tracking-widest px-2"
-                >
-                  Sobre
-                </button>
-                <button
-                  onClick={() =>
-                    document
-                      .getElementById("steps")
-                      ?.scrollIntoView({ behavior: "smooth" })
-                  }
-                  className="text-[11px] font-bold text-slate-300 hover:text-[#FAFAFA] transition-colors uppercase tracking-widest px-2"
-                >
-                  Processo
-                </button>
-                <div className="w-px h-4 bg-white/20 mx-1 hidden lg:block" />
-                <a
-                  href="/portal"
-                  className="text-[11px] font-bold text-slate-300 hover:text-[#FAFAFA] transition-colors uppercase tracking-widest px-2 flex items-center gap-2"
-                >
-                  <Users size={14} className="text-[#A89048]" />
-                  Portal do Cliente
-                </a>
-                <a
-                  href="/sistema/login"
-                  className="text-[11px] font-bold text-[#A89048] hover:text-[#e3c788] transition-colors uppercase tracking-widest px-3 py-1.5 border border-[#A89048]/30 hover:border-[#A89048] rounded-md flex items-center gap-2"
-                >
-                  <Briefcase size={14} />
-                  Área do Advogado
-                </a>
-              </div>
-            </div>
-          </div>
-
-          {/* Mobile: Minimal Floating Sandwich */}
-          <div className="md:hidden flex flex-1 justify-end">
+            {/* CTA único: WhatsApp */}
             <button
-              onClick={() => setIsMenuOpen(!isMenuOpen)}
-              className="p-3 bg-slate-900/20 backdrop-blur-xl text-[#A89048] border border-[#A89048]/30 rounded-full shadow-[0_12px_40px_rgba(0,0,0,0.6)] transition-all hover:scale-105 active:scale-95"
-              aria-label="Menu"
+              onClick={handleCtaClick}
+              className="flex items-center gap-2 bg-linear-to-r from-[#e3c788] via-[#d4b568] to-[#c8aa62] text-slate-900 font-bold text-[11px] md:text-xs uppercase tracking-widest px-4 md:px-6 py-2.5 md:py-3 rounded-lg shadow-[0_8px_20px_rgba(168,144,72,0.25)] transition-transform hover:scale-[1.03] active:scale-95"
+              aria-label="Falar no WhatsApp"
             >
-              {isMenuOpen ? <X size={24} /> : <Menu size={24} />}
+              <MessageCircle size={16} />
+              <span className="hidden sm:inline">Falar no WhatsApp</span>
+              <span className="sm:hidden">WhatsApp</span>
             </button>
           </div>
         </div>
-
-        {/* Mobile Menu Dropdown */}
-        {isMenuOpen && (
-          <div className="md:hidden mt-4 bg-slate-900/40 backdrop-blur-2xl rounded-2xl border border-[#A89048]/30 p-6 flex flex-col gap-6 animate-in fade-in slide-in-from-top-4 duration-300 shadow-[0_20px_50px_rgba(0,0,0,0.5)] pointer-events-auto">
-            <button
-              onClick={() => {
-                document
-                  .getElementById("office")
-                  ?.scrollIntoView({ behavior: "smooth" });
-                setIsMenuOpen(false);
-              }}
-              className="text-sm font-bold text-slate-100 border-b border-[#A89048]/10 pb-2 text-left uppercase tracking-widest"
-            >
-              Sobre
-            </button>
-            <button
-              onClick={() => {
-                document
-                  .getElementById("areas")
-                  ?.scrollIntoView({ behavior: "smooth" });
-                setIsMenuOpen(false);
-              }}
-              className="text-sm font-bold text-slate-100 border-b border-[#A89048]/10 pb-2 text-left uppercase tracking-widest"
-            >
-              Serviços
-            </button>
-            <button
-              onClick={() => {
-                document
-                  .getElementById("steps")
-                  ?.scrollIntoView({ behavior: "smooth" });
-                setIsMenuOpen(false);
-              }}
-              className="text-sm font-bold text-slate-100 border-b border-[#A89048]/10 pb-2 text-left uppercase tracking-widest"
-            >
-              Como Funciona
-            </button>
-            <button
-              onClick={() => {
-                document
-                  .getElementById("faq")
-                  ?.scrollIntoView({ behavior: "smooth" });
-                setIsMenuOpen(false);
-              }}
-              className="text-sm font-bold text-slate-100 border-b border-[#A89048]/10 pb-2 text-left uppercase tracking-widest"
-            >
-              Dúvidas Frequentes
-            </button>
-            <a
-              href="/portal"
-              className="text-sm font-bold text-slate-100 border-b border-[#A89048]/10 pb-2 text-left uppercase tracking-widest flex items-center gap-2"
-            >
-              <Users size={16} className="text-[#A89048]" />
-              Portal do Cliente
-            </a>
-            <a
-              href="/sistema/login"
-              className="text-sm font-bold text-[#A89048] border-b border-[#A89048]/10 pb-2 text-left uppercase tracking-widest flex items-center gap-2"
-            >
-              <Briefcase size={16} />
-              Área do Advogado
-            </a>
-          </div>
-        )}
       </nav>
 
       {/* HERO SECTION - Strict Full Screen on Mobile */}
@@ -431,7 +313,7 @@ export function HighConversionTemplate({
         <div className="mx-auto w-[90vw] lg:w-[min(90rem,80vw)] px-4 sm:px-6 lg:px-8 relative z-20 grid lg:grid-cols-12 gap-8 items-center h-full">
           {/* TEXT BLOCK (7 Cols) - Anchored to Bottom on Mobile */}
           <div className="lg:col-span-7 xl:col-span-6 flex flex-col items-center lg:items-start text-center lg:text-left gap-4 max-w-[52rem] lg:mx-0 py-8 min-w-0 h-full justify-end pb-24 lg:pb-0 lg:justify-center">
-            {/* MOBILE ONLY: Trust Badges (Excelência & Segurança) positioned at the top */}
+            {/* MOBILE ONLY: Selos de confianca (atendimento/sigilo) no topo */}
             <div className="flex lg:hidden flex-wrap justify-center gap-3 mb-6">
               <div className="flex items-center gap-2 bg-slate-900/40 backdrop-blur-xl border border-[#A89048]/30 rounded-lg px-4 py-2">
                 <div className="bg-[#A89048]/10 p-1.5 rounded-full">
@@ -439,10 +321,10 @@ export function HighConversionTemplate({
                 </div>
                 <div className="flex flex-col text-left">
                   <span className="text-[#A89048] text-[8px] font-bold uppercase tracking-widest leading-tight">
-                    Excelência e
+                    Atendimento
                   </span>
                   <span className="text-[#FAFAFA] text-[10px] font-serif tracking-widest">
-                    COMPETÊNCIA
+                    ARAPIRACA & ONLINE
                   </span>
                 </div>
               </div>
@@ -452,23 +334,31 @@ export function HighConversionTemplate({
                 </div>
                 <div className="flex flex-col text-left">
                   <span className="text-[#A89048] text-[8px] font-bold uppercase tracking-widest leading-tight">
-                    Total
+                    Sigilo
                   </span>
                   <span className="text-[#FAFAFA] text-[10px] font-serif tracking-widest">
-                    SEGURANÇA
+                    CONFIDENCIAL
                   </span>
                 </div>
               </div>
             </div>
 
             {/* Tags de Confiança */}
-            <div className="flex items-center gap-4">
+            <div className="flex flex-wrap items-center justify-center lg:justify-start gap-3">
               <div className="bg-[#A89048]/10 border border-[#A89048]/30 px-4 py-1.5 rounded-full flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-[#A89048] animate-pulse" />
                 <span className="text-[#A89048] text-[clamp(0.7rem,0.8vw,0.875rem)] font-bold tracking-widest uppercase">
                   +10 Anos de Experiência
                 </span>
               </div>
+              {hero.oab && (
+                <div className="bg-white/5 border border-[#A89048]/25 px-4 py-1.5 rounded-full flex items-center gap-2">
+                  <Scale size={13} className="text-[#A89048]" />
+                  <span className="text-[#FAFAFA]/85 text-[clamp(0.65rem,0.75vw,0.8rem)] font-semibold tracking-wide">
+                    {hero.oab}
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Título Monumental - Elegante */}
@@ -519,7 +409,7 @@ export function HighConversionTemplate({
                   </span>
                 </Button>
                 <p className="text-[#FAFAFA]/50 text-xs font-medium text-center lg:text-left mt-1">
-                  Sem compromisso · Atendimento confidencial · Resposta em minutos
+                  Sem compromisso · Atendimento confidencial · Retorno rápido pelo WhatsApp
                 </p>
               </div>
             </div>
@@ -527,7 +417,7 @@ export function HighConversionTemplate({
 
           {/* IMAGE BLOCK (5 Cols) - Absolute on Mobile to allow text to slide down */}
           <div className="absolute inset-x-0 bottom-0 h-[70vh] lg:relative lg:h-full lg:col-span-5 xl:col-span-6 flex items-end justify-center lg:justify-end pointer-events-none z-10 lg:z-20">
-            {/* Badge Competência - Desktop Only */}
+            {/* Selo Atendimento - Desktop Only */}
             <div
               className={`hidden lg:flex absolute z-20 pointer-events-auto ${
                 hero.badgesPosition === "low"
@@ -541,16 +431,16 @@ export function HighConversionTemplate({
                 </div>
                 <div className="flex flex-col">
                   <span className="text-[#A89048] text-[10px] font-bold uppercase tracking-[0.2em] leading-tight">
-                    Excelência e
+                    Atendimento
                   </span>
                   <span className="text-[#FAFAFA] text-xs font-serif tracking-widest">
-                    COMPETÊNCIA
+                    ARAPIRACA & ONLINE
                   </span>
                 </div>
               </div>
             </div>
 
-            {/* Badge Segurança - Desktop Only */}
+            {/* Selo Sigilo - Desktop Only */}
             <div className="hidden lg:flex absolute bottom-[25%] right-[5%] z-20 pointer-events-auto">
               <div className="flex items-center gap-3 bg-slate-900/40 backdrop-blur-xl border border-[#A89048]/30 rounded-lg px-6 py-3 shadow-[0_8px_32px_rgba(0,0,0,0.4)] transition-all duration-500 hover:scale-105 hover:border-[#A89048]/60 hover:shadow-[0_0_20px_rgba(168,144,72,0.2)] group cursor-default">
                 <div className="bg-[#A89048]/10 p-2 rounded-full">
@@ -558,10 +448,10 @@ export function HighConversionTemplate({
                 </div>
                 <div className="flex flex-col">
                   <span className="text-[#A89048] text-[10px] font-bold uppercase tracking-[0.2em] leading-tight">
-                    Total
+                    Sigilo
                   </span>
                   <span className="text-[#FAFAFA] text-xs font-serif tracking-widest">
-                    SEGURANÇA
+                    CONFIDENCIAL
                   </span>
                 </div>
               </div>
@@ -622,6 +512,26 @@ export function HighConversionTemplate({
         </div>
       </section>
 
+      {/* QUICK ANSWER (SEO/AEO) — resposta direta nos primeiros parágrafos */}
+      {sectionLabels?.quickAnswer && (
+        <section
+          aria-label="Resumo do atendimento"
+          className="bg-[#0A0A0A] border-b border-[#A89048]/15 px-4 md:px-8 py-6 md:py-8"
+        >
+          <div className="mx-auto w-[90vw] lg:w-[min(90rem,80vw)]">
+            <div className="flex items-start gap-4 rounded-2xl border border-[#A89048]/20 bg-white/[0.03] px-5 md:px-8 py-5 md:py-6">
+              <div className="hidden sm:flex shrink-0 w-10 h-10 rounded-full bg-[#A89048]/10 items-center justify-center">
+                <Scale size={18} className="text-[#A89048]" />
+              </div>
+              <p
+                className="text-slate-200 text-[clamp(0.95rem,1.1vw,1.1rem)] leading-relaxed font-medium [&_strong]:text-[#FAFAFA]"
+                dangerouslySetInnerHTML={{ __html: sectionLabels.quickAnswer }}
+              />
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* PRACTICE AREAS / LEGAL DESIGN SECTION */}
       <section
         id="areas"
@@ -665,7 +575,7 @@ export function HighConversionTemplate({
               </h2>
             )}
             <p className="text-[clamp(1rem,1.1vw,1.125rem)] 2xl:text-[clamp(1.125rem,1.5vw,1.375rem)] text-[#9a9a9a] max-w-3xl mx-auto leading-relaxed">
-              {sectionLabels?.servicesDescription ?? 'Somos um escritório de advocacia com atendimento "FULL SERVICE", e estamos comprometidos com a excelência na atuação em diferentes áreas do direito.'}
+              {sectionLabels?.servicesDescription ?? 'Somos um escritório de advocacia com atendimento "FULL SERVICE", com atuação diligente em diferentes áreas do direito.'}
             </p>
           </div>
 
@@ -838,7 +748,7 @@ export function HighConversionTemplate({
                 <h3 className="text-[clamp(1.5rem,4vw,2rem)] lg:text-[clamp(1.25rem,2vw,1.75rem)] 2xl:text-[clamp(1.5rem,2.5vw,2rem)] font-black text-slate-800 leading-snug md:leading-tight" dangerouslySetInnerHTML={{ __html: sectionLabels.bannerTitle }} />
               ) : (
                 <h3 className="text-[clamp(1.5rem,4vw,2rem)] lg:text-[clamp(1.25rem,2vw,1.75rem)] 2xl:text-[clamp(1.5rem,2.5vw,2rem)] font-black text-slate-800 leading-snug md:leading-tight">
-                  Referência em <span className="text-[#A89048]">direito</span> na
+                  Advocacia em <span className="text-[#A89048]">direito</span> na
                   cidade de <br className="md:block" /> Arapiraca-AL
                 </h3>
               )}
@@ -890,12 +800,12 @@ export function HighConversionTemplate({
                     <Award className="w-5 h-5 text-[#A89048]" />
                   </div>
                   <h4 className="font-bold text-slate-900 text-base md:text-sm uppercase tracking-wider">
-                    Advocacia de excelência
+                    +10 anos de atuação
                   </h4>
                 </div>
                 <p className="text-slate-500 text-sm md:text-xs leading-loose md:leading-relaxed font-medium">
-                  Escritório de advocacia com reputação sólida, confiável e
-                  referência no meio jurídico.
+                  Escritório de advocacia em Arapiraca-AL, com atuação diligente
+                  e transparente em cada caso.
                 </p>
               </div>
             </div>
@@ -928,7 +838,7 @@ export function HighConversionTemplate({
                   <h2 className="text-[clamp(2.15rem,5vw,3rem)] lg:text-[clamp(1.75rem,3.5vw,3rem)] 2xl:text-[clamp(2.25rem,4vw,4rem)] font-black text-[#FAFAFA] leading-[1.1] mb-6" dangerouslySetInnerHTML={{ __html: sectionLabels.officeTitle }} />
                 ) : (
                   <h2 className="text-[clamp(2.15rem,5vw,3rem)] lg:text-[clamp(1.75rem,3.5vw,3rem)] 2xl:text-[clamp(2.25rem,4vw,4rem)] font-black text-[#FAFAFA] leading-[1.1] mb-6">
-                    Excelência no Atendimento <br className="hidden md:block" />
+                    Atendimento <br className="hidden md:block" />
                     <span className="text-[#A89048]">Presencial ou Online!</span>
                   </h2>
                 )}
@@ -942,8 +852,8 @@ export function HighConversionTemplate({
                         <span className="text-[#FAFAFA] font-bold">
                           André Lustosa Advogados
                         </span>{" "}
-                        consolidou-se como referência jurídica em Arapiraca e
-                        região, unindo tradição e modernidade para entregar
+                        atua há mais de 10 anos em Arapiraca e
+                        região, unindo tradição e modernidade para buscar
                         resultados concretos aos nossos clientes.
                       </p>
                       <p>
@@ -980,10 +890,10 @@ export function HighConversionTemplate({
                   </div>
                   <div>
                     <h4 className="text-[#FAFAFA] font-bold mb-2 sm:mb-1 uppercase tracking-wider text-sm sm:text-sm">
-                      Foco em Resultados
+                      Acompanhamento do Caso
                     </h4>
                     <p className="text-slate-500 text-base sm:text-xs leading-relaxed">
-                      Atuação dedicada na busca pela resolução do seu caso.
+                      Atuação dedicada no acompanhamento do seu caso.
                     </p>
                   </div>
                 </div>
@@ -1029,8 +939,8 @@ export function HighConversionTemplate({
                       </span>
                     </div>
                     <p className="text-slate-400 text-sm italic font-serif">
-                      A maior estrutura jurídica dedicada ao seu direito na
-                      região.
+                      Estrutura para atendimento presencial em Arapiraca e
+                      digital em todo o Brasil.
                     </p>
                   </div>
                 </div>
@@ -1070,7 +980,7 @@ export function HighConversionTemplate({
                 <div className="inline-flex items-center gap-3 px-4 py-2 rounded-full bg-[#A89048]/10 border border-[#A89048]/20 mb-8 backdrop-blur-md mx-auto lg:mx-0">
                   <Globe size={14} className="text-[#A89048]" />
                   <span className="text-[#A89048] text-[10px] font-black uppercase tracking-widest md:tracking-[0.2em]">
-                    Cobertura Nacional • Full Support
+                    Atendimento em todo o Brasil
                   </span>
                 </div>
 
@@ -1078,16 +988,16 @@ export function HighConversionTemplate({
                   className="text-[clamp(1.5rem,3vw,2.5rem)] 2xl:text-[clamp(2.25rem,3.5vw,3.5rem)] font-black text-[#FAFAFA] mb-6 leading-[1.1] tracking-tight text-center lg:text-left"
                   style={{ textWrap: "balance" }}
                 >
-                  Atendimento Digital de{" "}
-                  <span className="text-[#A89048]">Alta Performance</span> em
+                  Atendimento{" "}
+                  <span className="text-[#A89048]">Digital</span> em
                   todo o Brasil
                 </h2>
 
                 <p className="text-slate-400 text-[clamp(1rem,1.1vw,1.125rem)] leading-relaxed mb-10 max-w-xl mx-auto lg:mx-0 font-medium">
                   Não importa onde você esteja. Nossa estrutura foi desenhada
                   para oferecer{" "}
-                  <span className="text-slate-200">defesa de excelência</span>{" "}
-                  em qualquer estado brasileiro, unindo tecnologia de ponta ao
+                  <span className="text-slate-200">atendimento cuidadoso</span>{" "}
+                  em qualquer estado brasileiro, unindo tecnologia ao
                   atendimento humano e personalizado que seu caso exige.
                 </p>
 
@@ -1208,7 +1118,7 @@ export function HighConversionTemplate({
               <div className="flex items-center justify-center gap-4 mb-6">
                 <div className="h-[2px] w-12 bg-[#A89048]" />
                 <span className="text-[#A89048] text-sm font-black tracking-[0.4em] uppercase">
-                  Excelência
+                  Como Atuamos
                 </span>
                 <div className="h-[2px] w-12 bg-[#A89048]" />
               </div>
@@ -1230,8 +1140,8 @@ export function HighConversionTemplate({
             >
               <p className="text-[#444444] text-[clamp(1rem,1.1vw,1.125rem)] font-medium leading-relaxed max-w-2xl mx-auto">
                 Unimos tradição jurídica à inovação tecnológica para entregar
-                resultados excepcionais. Nossa estrutura é moldada para a
-                agilidade do mundo moderno e a máxima proteção dos seus
+                resultados concretos. Nossa estrutura é moldada para a
+                agilidade do mundo moderno e o cuidado com a proteção dos seus
                 interesses.
               </p>
             </Reveal>
@@ -1252,23 +1162,23 @@ export function HighConversionTemplate({
               },
               {
                 icon: <Users size={32} strokeWidth={1.5} />,
-                title: "Equipe de Especialista",
-                desc: "Nossa equipe é formada por especialistas renomados em diversas áreas do Direito. Cada caso é analisado por mentes brilhantes dedicadas a encontrar a melhor estratégia jurídica possível.",
+                title: "Equipe de Advogados",
+                desc: "Nossa equipe é formada por advogados que atuam em diversas áreas do Direito. Cada caso é analisado com dedicação para encontrar a melhor estratégia jurídica possível.",
               },
               {
                 icon: <Headphones size={32} strokeWidth={1.5} />,
-                title: "Atendimento Exclusivo",
-                desc: "Oferecemos um suporte humanizado e 100% focado no cliente. Você tem acesso direto aos especialistas, garantindo transparência total e uma experiência de atendimento verdadeiramente VIP.",
+                title: "Atendimento Personalizado",
+                desc: "Oferecemos um suporte humanizado e focado no cliente. Você fala diretamente com o escritório, com transparência e uma experiência de atendimento verdadeiramente personalizada.",
               },
               {
                 icon: <Zap size={32} strokeWidth={1.5} />,
-                title: "Resolução Eficiente",
-                desc: "Nosso padrão é a celeridade absoluta. Combatemos a morosidade com proatividade e diligência constante para que sua demanda seja resolvida no menor tempo viável, sem abrir mão da qualidade.",
+                title: "Atuação Diligente",
+                desc: "Combatemos a morosidade com proatividade e diligência constante, para que a sua demanda seja acompanhada com atenção em cada etapa, sem abrir mão da qualidade.",
               },
               {
                 icon: <Phone size={32} strokeWidth={1.5} />,
-                title: "Plantão Jurídico 24h",
-                desc: "Emergências não escolhem hora. Por isso, mantemos suporte ininterrupto via canais digitais. Estamos onde você estiver, a qualquer momento, garantindo segurança jurídica quando você mais precisa.",
+                title: "Atendimento pelo WhatsApp",
+                desc: "Você fala com o escritório pelos canais digitais de forma prática. Estamos a um WhatsApp de distância para orientar o seu caso e agendar o seu atendimento.",
               },
             ].map((value, idx) => (
               <Reveal
@@ -1340,7 +1250,7 @@ export function HighConversionTemplate({
 
             {[
               { num: "01", title: "Contato", desc: "Envie seu caso\n(WhatsApp ou formulário).", icon: <MessageCircle size={32} className="text-[#0B0B0B]" /> },
-              { num: "02", title: "Análise", desc: "Receba uma\nanálise gratuita.", icon: <Search size={32} className="text-[#0B0B0B]" /> },
+              { num: "02", title: "Análise", desc: "Receba uma análise\ndo seu caso.", icon: <Search size={32} className="text-[#0B0B0B]" /> },
               { num: "03", title: "Direitos", desc: "Entenda\nclaramente seus direitos.", icon: <CheckCircle2 size={32} className="text-[#0B0B0B]" /> },
               { num: "04", title: "Processo", desc: "Caso avance, iniciamos o processo\nimediatamente com acompanhamento.", icon: <Gavel size={32} className="text-[#0B0B0B]" /> }
             ].map((step, index) => {
@@ -1394,7 +1304,7 @@ export function HighConversionTemplate({
             
             {[
               { num: "01", title: "Contato", desc: "Envie seu caso\n(WhatsApp ou formulário).", icon: <MessageCircle size={36} className="text-[#0B0B0B]" /> },
-              { num: "02", title: "Análise", desc: "Receba uma\nanálise gratuita.", icon: <Search size={36} className="text-[#0B0B0B]" /> },
+              { num: "02", title: "Análise", desc: "Receba uma análise\ndo seu caso.", icon: <Search size={36} className="text-[#0B0B0B]" /> },
               { num: "03", title: "Direitos", desc: "Entenda\nclaramente seus direitos.", icon: <CheckCircle2 size={36} className="text-[#0B0B0B]" /> },
               { num: "04", title: "Processo", desc: "Caso avance, iniciamos o processo imediatamente.", icon: <Gavel size={36} className="text-[#0B0B0B]" /> }
             ].map((step, index) => (
@@ -1516,9 +1426,14 @@ export function HighConversionTemplate({
               Escritório de Advocacia em Arapiraca – AL
             </h4>
             <p className="text-slate-300 text-sm md:text-[0.95rem] leading-relaxed max-w-sm md:max-w-md font-medium">
-              Atuamos com excelência técnica, visão estratégica e sensibilidade no atendimento.<br/>
-              Com estrutura para atender presencialmente em Arapiraca e virtualmente em todo o Brasil, oferecemos soluções jurídicas personalizadas e eficazes para pessoas físicas e jurídicas.
+              Atuamos com dedicação técnica, visão estratégica e sensibilidade no atendimento.<br/>
+              Com estrutura para atender presencialmente em Arapiraca e virtualmente em todo o Brasil, oferecemos soluções jurídicas personalizadas para pessoas físicas e jurídicas.
             </p>
+            {footer?.oab && (
+              <p className="mt-5 text-[#A89048] text-xs md:text-sm font-bold tracking-wide">
+                Responsável técnico: {footer.oab}
+              </p>
+            )}
           </div>
 
           {/* MAPA DO SITE (3 cols) */}
@@ -1565,7 +1480,7 @@ export function HighConversionTemplate({
                 <div className="w-11 h-11 rounded-full border border-[#A89048] flex items-center justify-center text-[#A89048] group-hover:bg-[#A89048]/20 transition-all shadow-[0_0_15px_rgba(168,144,72,0.15)] shrink-0">
                   <Clock size={20} />
                 </div>
-                <span className="group-hover:text-white transition-colors">Atendimento 24 Horas</span>
+                <span className="group-hover:text-white transition-colors">Atendimento pelo WhatsApp</span>
               </div>
               <div className="flex items-center gap-5 group">
                 <div className="w-11 h-11 rounded-full border border-[#A89048] flex items-center justify-center text-[#A89048] group-hover:bg-[#A89048]/20 transition-all shadow-[0_0_15px_rgba(168,144,72,0.15)] shrink-0">
@@ -1582,7 +1497,11 @@ export function HighConversionTemplate({
         <div className="relative z-10 mx-auto w-[90vw] lg:w-[min(90rem,80vw)] px-4 sm:px-6 lg:px-8">
           <div className="border-t border-white/10 pt-8 pb-4 flex flex-col md:flex-row items-center justify-between text-[13px] text-slate-400 font-medium">
             <p>&copy; {new Date().getFullYear()} – Todos os Direitos Reservados à André Lustosa Advogados.</p>
-            <div className="flex items-center gap-2 mt-4 md:mt-0 font-bold">
+            <div className="flex flex-wrap items-center justify-center gap-2 mt-4 md:mt-0 font-bold">
+              <a href="/portal" className="hover:text-white transition-colors">Portal do Cliente</a>
+              <span className="opacity-50">|</span>
+              <a href="/sistema/login" className="hover:text-white transition-colors">Área do Advogado</a>
+              <span className="opacity-50">|</span>
               <a href="#" className="hover:text-white transition-colors">Termos de Uso</a>
               <span className="opacity-50">|</span>
               <a href="#" className="hover:text-white transition-colors">Política de Privacidade</a>

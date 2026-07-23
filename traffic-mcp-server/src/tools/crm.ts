@@ -2287,8 +2287,10 @@ function registerSprint2Tools(server: McpServer) {
     'traffic_remove_extension',
     {
       description:
-        'Remove (soft-delete) um asset propriamente. Cascade no Google: vinculos sao removidos automatic. ' +
-        'EXIGE confirm + reason (min 3 chars). Operacao irreversivel pela UI.',
+        'ATENCAO: a Google Ads API v23 NAO permite remover um Asset (proto AssetOperation so tem ' +
+        'create/update — Asset e imutavel). Esta tool devolve erro instrutivo. Para "remover" uma ' +
+        'extensao, use traffic_detach_extension para desanexar cada vinculo (asset_link_resource_name ' +
+        'obtido via traffic_list_extensions). O Asset em si fica permanente na conta, sem custo.',
       inputSchema: {
         asset_id: z.string(),
         confirm: z.boolean(),
@@ -2306,6 +2308,58 @@ function registerSprint2Tools(server: McpServer) {
           { toolCallId },
         );
         return ok(result, `Remocao do asset ${input.asset_id} enfileirada.`);
+      }),
+  );
+
+  // ─── Impression Share (fatia de leilão própria) ────────────────────────
+  server.registerTool(
+    'traffic_get_impression_share',
+    {
+      description:
+        'Fatia de leilão (Impression Share) da PRÓPRIA conta — por campanha, grupo ou palavra-chave. ' +
+        'IMPORTANTE: NÃO é o Auction Insights de concorrentes (domínios rivais, overlap, outranking, position_above) — ' +
+        'esse relatório NÃO é exposto pela Google Ads API (recurso auction_insight é gated por allowlist FECHADO); ' +
+        'só existe na tela do Google Ads (Insights > Relatórios > Estatísticas de leilão). ' +
+        'Esta tool entrega o que a API libera sobre SUA competitividade no leilão: ' +
+        'impression_share (fatia captada), top/absolute_top (fatia no topo / topo absoluto), ' +
+        'rank_lost (perdida por posição — qualidade+lance) e budget_lost (perdida por orçamento; só CAMPAIGN/AD_GROUP). ' +
+        'Valores são frações 0..1 (0.83 = 83%). insufficient_data=true = sem volume de leilão suficiente pro Google reportar. ' +
+        'Datas: date_preset (default LAST_30_DAYS) OU date_from+date_to (YYYY-MM-DD). GAQL live via worker — pode demorar 1-3s. READ-ONLY.',
+      inputSchema: {
+        level: z.enum(['CAMPAIGN', 'AD_GROUP', 'KEYWORD']).default('CAMPAIGN'),
+        campaign_id: campaignIdSchema.optional(),
+        ad_group_id: z.string().optional(),
+        keyword_id: z
+          .string()
+          .optional()
+          .describe('UUID interno da keyword OU criterion_id do Google (só p/ level=KEYWORD).'),
+        date_preset: z
+          .enum([
+            'TODAY', 'YESTERDAY', 'LAST_7_DAYS', 'LAST_14_DAYS', 'LAST_30_DAYS',
+            'THIS_MONTH', 'LAST_MONTH', 'LAST_BUSINESS_WEEK',
+            'THIS_WEEK_SUN_TODAY', 'THIS_WEEK_MON_TODAY',
+            'LAST_WEEK_SUN_SAT', 'LAST_WEEK_MON_SUN',
+          ])
+          .optional(),
+        date_from: z.string().optional().describe('YYYY-MM-DD (usar junto com date_to).'),
+        date_to: z.string().optional().describe('YYYY-MM-DD (usar junto com date_from).'),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async (input) =>
+      safe('traffic_get_impression_share', async (toolCallId) => {
+        const result = await crmTrafficService.get<{
+          rows: any[];
+          level: string;
+          date_range: string;
+          note?: string;
+        }>('/trafego/impression-share', input, { toolCallId, cache: false });
+        const n = result?.rows?.length ?? 0;
+        const lines = [
+          `Impression Share (${result?.level ?? input.level}) — ${n} linha(s), período ${result?.date_range ?? '—'}.`,
+        ];
+        if (result?.note) lines.push(result.note);
+        return ok(result, lines.join('\n'));
       }),
   );
 

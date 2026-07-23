@@ -1390,6 +1390,50 @@ export class TrafegoController {
     );
   }
 
+  /**
+   * Impression Share (fatia de leilão) da PRÓPRIA conta — alternativa
+   * suportada ao Auction Insights de concorrentes (que a Google Ads API NÃO
+   * expõe). Live via read queue. Nível CAMPAIGN | AD_GROUP | KEYWORD.
+   */
+  @Get('impression-share')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  async getImpressionShare(
+    @Req() req: any,
+    @Query('level') level?: string,
+    @Query('campaign_id') campaignId?: string,
+    @Query('ad_group_id') adGroupId?: string,
+    @Query('keyword_id') keywordId?: string,
+    @Query('date_preset') datePreset?: string,
+    @Query('date_from') dateFrom?: string,
+    @Query('date_to') dateTo?: string,
+  ) {
+    const tenantId = req.user.tenant_id;
+    // GAQL espera int64 (google_id). Resolve UUID interno -> google_id.
+    const googleCampaignId = campaignId
+      ? await this.service.resolveCampaignGoogleId(tenantId, campaignId)
+      : undefined;
+    let googleAdGroupId = adGroupId
+      ? await this.service.resolveAdGroupGoogleId(tenantId, adGroupId)
+      : undefined;
+    let keywordCriterionId: string | undefined;
+    if (keywordId) {
+      const kw = await this.service.resolveKeywordCriterion(tenantId, keywordId);
+      keywordCriterionId = kw.criterionId;
+      // criterion_id não é único entre grupos — se o grupo não veio explícito,
+      // escopa pelo grupo da própria keyword.
+      if (!googleAdGroupId && kw.adGroupGoogleId) googleAdGroupId = kw.adGroupGoogleId;
+    }
+    return await this.enqueueReadJob(req, 'impression_share', {
+      level: (level || 'CAMPAIGN').toUpperCase(),
+      campaign_id: googleCampaignId,
+      ad_group_id: googleAdGroupId,
+      keyword_criterion_id: keywordCriterionId,
+      date_preset: datePreset,
+      date_from: dateFrom,
+      date_to: dateTo,
+    });
+  }
+
   // ═══════════════════════════════════════════════════════════════════════
   // Sprint 3 backlog (2026-05-17) — Targeting + Bulk
   // ═══════════════════════════════════════════════════════════════════════
@@ -1839,7 +1883,8 @@ export class TrafegoController {
       | 'customer_settings'
       | 'suggest_geo_targets'
       | 'keyword_ideas'
-      | 'keyword_forecast',
+      | 'keyword_forecast'
+      | 'impression_share',
     params: Record<string, any>,
     timeoutMs = 30_000,
   ) {
