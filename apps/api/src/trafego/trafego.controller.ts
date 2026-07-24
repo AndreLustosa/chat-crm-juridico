@@ -1661,6 +1661,23 @@ export class TrafegoController {
   }
 
   /**
+   * Desempenho geográfico por município (GAQL live) — base do "mapa de leads".
+   * Localização física do usuário; filtra por região (ex: AL). days: 1..365.
+   */
+  @Get('reads/geo-performance')
+  @Roles('ADMIN', 'ADVOGADO')
+  async getGeoPerformance(
+    @Req() req: any,
+    @Query('days') days?: string,
+    @Query('region') region?: string,
+  ) {
+    return await this.enqueueReadJob(req, 'geo_performance', {
+      days: days ? parseInt(days, 10) : 30,
+      region: region || undefined,
+    });
+  }
+
+  /**
    * BUG-F treatment (2026-05-18) — diagnose Enhanced Conversions for Leads.
    *
    * Combina:
@@ -1885,7 +1902,8 @@ export class TrafegoController {
       | 'suggest_geo_targets'
       | 'keyword_ideas'
       | 'keyword_forecast'
-      | 'impression_share',
+      | 'impression_share'
+      | 'geo_performance',
     params: Record<string, any>,
     timeoutMs = 30_000,
   ) {

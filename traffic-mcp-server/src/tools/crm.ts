@@ -2363,6 +2363,52 @@ function registerSprint2Tools(server: McpServer) {
       }),
   );
 
+  // ─── Desempenho geográfico por município (mapa de leads) ───────────────
+  server.registerTool(
+    'traffic_get_geo_performance',
+    {
+      description:
+        'Desempenho por MUNICÍPIO (localização física do usuário — LOCATION_OF_PRESENCE). ' +
+        'Base do "mapa de leads": cobertura ~total dos cliques (o Google sabe onde o usuário está), ' +
+        'ao contrário do campo cidade do CRM (esparso). Retorna municipios[] com clicks, impressions, ' +
+        'conversions (=leads) e cost_brl, resolvidos a nome+estado via geo_target_constant. ' +
+        'Filtra por region (ex: "AL" ou "Alagoas"). days: 1..365 (default 30). ' +
+        'unresolved_clicks = cliques sem cidade determinada. GAQL live — pode demorar 1-3s. READ-ONLY.',
+      inputSchema: {
+        days: z
+          .number()
+          .int()
+          .min(1)
+          .max(365)
+          .optional()
+          .describe('Janela retroativa em dias (default 30).'),
+        region: z
+          .string()
+          .optional()
+          .describe('Filtra por estado (ex: "AL" ou "Alagoas"). Vazio = todas as regiões.'),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async (input) =>
+      safe('traffic_get_geo_performance', async (toolCallId) => {
+        const result = await crmTrafficService.get<{
+          municipios: any[];
+          totals: { clicks: number; conversions: number; cities: number };
+          region: string | null;
+          unresolved_clicks: number;
+          note?: string;
+        }>('/trafego/reads/geo-performance', input, { toolCallId, cache: false });
+        const n = result?.municipios?.length ?? 0;
+        const lines = [
+          `Geo (${result?.region ?? 'todas'}) — ${n} município(s), ` +
+            `${result?.totals?.clicks ?? 0} cliques, ${result?.totals?.conversions ?? 0} leads. ` +
+            `Sem cidade: ${result?.unresolved_clicks ?? 0} cliques.`,
+        ];
+        if (result?.note) lines.push(result.note);
+        return ok(result, lines.join('\n'));
+      }),
+  );
+
   // ─── Quality Score Visibility ──────────────────────────────────────────
   server.registerTool(
     'traffic_get_quality_score_history',

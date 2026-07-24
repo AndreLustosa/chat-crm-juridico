@@ -39,7 +39,12 @@ export type ReadJobInput = {
     | 'keyword_forecast'
     // Impression Share próprio (2026-07-23) — alternativa suportada ao
     // Auction Insights de concorrentes (que a Google Ads API não expõe).
-    | 'impression_share';
+    | 'impression_share'
+    // Desempenho geográfico por município (2026-07-24) — mapa de leads.
+    // Localização física do usuário (LOCATION_OF_PRESENCE), resolvida a
+    // nome de cidade via geo_target_constant. Cobertura real (~todo clique),
+    // ao contrário do campo cidade do CRM (esparso).
+    | 'geo_performance';
   params: Record<string, any>;
 };
 
@@ -78,6 +83,8 @@ export class TrafegoReadProcessor extends WorkerHost {
         return await this.customerSettings(customer);
       case 'impression_share':
         return await this.impressionShare(customer, params as any);
+      case 'geo_performance':
+        return await this.geoPerformance(customer, params as any);
       case 'suggest_geo_targets':
         return await this.clientSvc.suggestGeoTargets(customer, {
           query: String(params.query ?? ''),
@@ -1180,6 +1187,178 @@ export class TrafegoReadProcessor extends WorkerHost {
       note:
         billingSetups.length === 0 && accountBudgets.length === 0
           ? 'Nenhum billing_setup/account_budget retornado. Conta pode usar billing manual ou esta sem setup. Confira via Google Ads UI.'
+          : undefined,
+    };
+  }
+
+  /**
+   * Desempenho geográfico por município (2026-07-24) — base do "mapa de leads".
+   *
+   * Usa geographic_view com location_type = LOCATION_OF_PRESENCE (onde o
+   * usuário fisicamente estava, não o que pesquisou), segmentado por
+   * segments.geo_target_city. Depois resolve o id da cidade → nome + estado
+   * via geo_target_constant. Filtra por região (ex: "Alagoas"/"AL") se pedido.
+   *
+   * Cobertura ~total dos cliques (o Google sabe a localização), ao contrário
+   * do campo `cidade` do CRM (esparso). Métrica de "leads" = conversions.
+   */
+  private async geoPerformance(
+    customer: any,
+    params: { days?: number; region?: string },
+  ): Promise<{
+    municipios: Array<{
+      city_id: string;
+      city: string;
+      region: string;
+      clicks: number;
+      impressions: number;
+      conversions: number;
+      cost_brl: number;
+    }>;
+    totals: {
+      clicks: number;
+      impressions: number;
+      conversions: number;
+      cost_brl: number;
+      cities: number;
+    };
+    region: string | null;
+    unresolved_clicks: number;
+    note?: string;
+  }> {
+    const days = Math.min(Math.max(Number(params.days) || 30, 1), 365);
+    const since = new Date();
+    since.setUTCDate(since.getUTCDate() - days);
+    const sinceStr = since.toISOString().slice(0, 10);
+    const regionInput = (params.region || '').trim();
+
+    const zero = { clicks: 0, impressions: 0, conversions: 0, cost_brl: 0, cities: 0 };
+
+    // 1) Métricas por cidade (localização física do usuário).
+    let rows: any[] = [];
+    try {
+      rows = (await customer.query(`
+        SELECT
+          segments.geo_target_city,
+          metrics.clicks,
+          metrics.impressions,
+          metrics.conversions,
+          metrics.cost_micros
+        FROM geographic_view
+        WHERE geographic_view.location_type = 'LOCATION_OF_PRESENCE'
+          AND segments.date >= '${sinceStr}'
+      `)) as any[];
+    } catch (e: any) {
+      return {
+        municipios: [],
+        totals: { ...zero },
+        region: regionInput || null,
+        unresolved_clicks: 0,
+        note: `Falha na leitura geográfica (geographic_view): ${e?.message ?? e}`,
+      };
+    }
+
+    // 2) Agrega por constante de cidade. Linhas sem cidade (Google não
+    //    determinou a localização) entram em "unresolved".
+    type Agg = { clicks: number; impressions: number; conversions: number; cost_micros: number };
+    const byCity = new Map<string, Agg>();
+    let unresolvedClicks = 0;
+    for (const r of rows) {
+      const cityRes: string | undefined = r?.segments?.geo_target_city;
+      const clicks = Number(r?.metrics?.clicks ?? 0);
+      if (!cityRes) {
+        unresolvedClicks += clicks;
+        continue;
+      }
+      const id = String(cityRes).split('/').pop() as string;
+      const a = byCity.get(id) ?? { clicks: 0, impressions: 0, conversions: 0, cost_micros: 0 };
+      a.clicks += clicks;
+      a.impressions += Number(r?.metrics?.impressions ?? 0);
+      a.conversions += Number(r?.metrics?.conversions ?? 0);
+      a.cost_micros += Number(r?.metrics?.cost_micros ?? 0);
+      byCity.set(id, a);
+    }
+
+    if (byCity.size === 0) {
+      return {
+        municipios: [],
+        totals: { ...zero },
+        region: regionInput || null,
+        unresolved_clicks: unresolvedClicks,
+        note: 'Sem cidade determinada no período (conta pequena ou geo indisponível).',
+      };
+    }
+
+    // 3) Resolve id → nome + estado via geo_target_constant.
+    const ids = [...byCity.keys()];
+    const info = new Map<string, { name: string; region: string }>();
+    try {
+      const cons = (await customer.query(`
+        SELECT
+          geo_target_constant.id,
+          geo_target_constant.name,
+          geo_target_constant.canonical_name,
+          geo_target_constant.target_type
+        FROM geo_target_constant
+        WHERE geo_target_constant.id IN (${ids.join(', ')})
+      `)) as any[];
+      for (const c of cons) {
+        const g = c?.geo_target_constant ?? {};
+        // canonical_name ex: "Arapiraca,Alagoas,Brazil" → estado = penúltimo.
+        const parts = String(g.canonical_name ?? '')
+          .split(',')
+          .map((s: string) => s.trim())
+          .filter(Boolean);
+        const region = parts.length >= 2 ? parts[parts.length - 2] : '';
+        info.set(String(g.id), { name: g.name ?? parts[0] ?? String(g.id), region });
+      }
+    } catch {
+      /* soft-fail: usa o id como nome */
+    }
+
+    // 4) Monta lista, filtra por região (aceita "AL" → "Alagoas").
+    const norm = (s: string) =>
+      s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+    const wantRegion = regionInput
+      ? norm(regionInput.toUpperCase() === 'AL' ? 'Alagoas' : regionInput)
+      : null;
+
+    const municipios = ids
+      .map((id) => {
+        const m = byCity.get(id) as Agg;
+        const i = info.get(id) ?? { name: id, region: '' };
+        return {
+          city_id: id,
+          city: i.name,
+          region: i.region,
+          clicks: m.clicks,
+          impressions: m.impressions,
+          conversions: Math.round(m.conversions * 100) / 100,
+          cost_brl: m.cost_micros / 1_000_000,
+        };
+      })
+      .filter((x) => !wantRegion || norm(x.region) === wantRegion)
+      .sort((a, b) => b.clicks - a.clicks);
+
+    const totals = municipios.reduce(
+      (acc, x) => ({
+        clicks: acc.clicks + x.clicks,
+        impressions: acc.impressions + x.impressions,
+        conversions: Math.round((acc.conversions + x.conversions) * 100) / 100,
+        cost_brl: acc.cost_brl + x.cost_brl,
+        cities: acc.cities + 1,
+      }),
+      { ...zero },
+    );
+
+    return {
+      municipios,
+      totals,
+      region: regionInput || null,
+      unresolved_clicks: unresolvedClicks,
+      note:
+        municipios.length === 0
+          ? `Nenhuma cidade na região "${regionInput}" no período. Cidades vistas: ${ids.length}.`
           : undefined,
     };
   }
