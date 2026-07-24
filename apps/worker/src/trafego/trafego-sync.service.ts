@@ -382,6 +382,14 @@ export class TrafegoSyncService extends WorkerHost {
       // ─── 2. Metricas diarias por campanha ──────────────────────────────
       const fromStr = dateFrom.toISOString().slice(0, 10); // YYYY-MM-DD
       const toStr = dateTo.toISOString().slice(0, 10);
+      // Métricas DIÁRIAS: janela fixa de 30 dias, independente do lookback padrão
+      // (7d). O dashboard mostra até 30 dias e o Google segue ajustando dias antigos
+      // (invalid clicks, atribuição tardia); com só 7d os dias 8-30 ficavam
+      // congelados/incompletos e o "30 dias" não batia com o Ads. As tabelas
+      // horária/device já usam 30d — aqui alinhamos a diária.
+      const dailyFrom = new Date(dateTo);
+      dailyFrom.setUTCDate(dailyFrom.getUTCDate() - 30);
+      const dailyFromStr = dailyFrom.toISOString().slice(0, 10);
       // P2: impression_share fields adicionados — só funcionam em campanhas
       // SEARCH (Google retorna null pra outros tipos, tratamos como undefined).
       const metricRows: any[] = await customer.query(`
@@ -402,7 +410,7 @@ export class TrafegoSyncService extends WorkerHost {
           metrics.search_top_impression_share,
           metrics.search_absolute_top_impression_share
         FROM campaign
-        WHERE segments.date BETWEEN '${fromStr}' AND '${toStr}'
+        WHERE segments.date BETWEEN '${dailyFromStr}' AND '${toStr}'
       `);
 
       for (const row of metricRows) {
