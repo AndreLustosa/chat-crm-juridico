@@ -3855,10 +3855,16 @@ export class TrafegoService {
       };
     }
 
-    // Datas de referencia (UTC — TrafficMetricDaily.date eh @db.Date)
-    const today = new Date();
-    today.setUTCHours(0, 0, 0, 0);
-    const todayStr = today.toISOString().slice(0, 10);
+    // Datas de referencia — "hoje" no fuso da CONTA (Google Ads reporta
+    // segments.date no timezone da conta, e TrafficMetricDaily.date guarda essa
+    // data). Usar UTC fazia "hoje" virar o dia seguinte a partir das ~21h Maceio,
+    // deixando period=today apontando pra um dia sem dados (zerado). Mantemos o
+    // `today` na meia-noite UTC da data local pra casar com o @db.Date.
+    const tz = account.time_zone || 'America/Maceio';
+    const todayStr = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+    }).format(new Date());
+    const today = new Date(`${todayStr}T00:00:00.000Z`);
 
     const monthStart = new Date(today);
     monthStart.setUTCDate(1);
