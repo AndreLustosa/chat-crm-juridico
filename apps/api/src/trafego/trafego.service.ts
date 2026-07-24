@@ -3879,15 +3879,26 @@ export class TrafegoService {
     // 'today'/'7d'/'30d'/'month'/'prev_month' definem rangeFrom..rangeTo;
     // os KPIs agregados (spend, cpl, ctr, avg_cpc) sao calculados sobre
     // ESSE range em vez do default fixo de 7d.
+    //
+    // "7 dias" e "30 dias" seguem o Google Ads ("Últimos N dias"): N dias
+    // COMPLETOS terminando ONTEM — o dia de hoje (parcial) fica de fora, senão
+    // os totais nao batem com o painel do Ads (ex.: hoje 23 → 7 dias = 16 a 22).
+    // "Mês" segue mês-corrente e inclui hoje (igual "Este mês" do Ads).
+    const yesterday = new Date(today);
+    yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+
     const period = _opts.period ?? '7d';
     let rangeFrom = sevenDaysAgo;
-    let rangeTo = today;
+    let rangeTo = yesterday;
     if (period === 'today') {
       rangeFrom = today;
+      rangeTo = today;
     } else if (period === '30d') {
       rangeFrom = thirtyDaysAgo;
+      rangeTo = yesterday;
     } else if (period === 'month') {
       rangeFrom = monthStart;
+      rangeTo = today;
     } else if (period === 'prev_month') {
       const prevMonthEnd = new Date(monthStart);
       prevMonthEnd.setUTCDate(prevMonthEnd.getUTCDate() - 1);
