@@ -143,6 +143,7 @@ export class TrafegoController {
       dateFrom: query.date_from,
       dateTo: query.date_to,
       channelType: query.channel_type,
+      campaignId: query.campaign_id,
     });
   }
 

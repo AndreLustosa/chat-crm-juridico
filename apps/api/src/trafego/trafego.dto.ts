@@ -1801,6 +1801,11 @@ export class DashboardQueryDto {
   @IsOptional()
   channel_type?: string;
 
+  /** Filtra os KPIs por uma campanha especifica (TrafficCampaign.id interno). */
+  @IsString()
+  @IsOptional()
+  campaign_id?: string;
+
   /** ISO date (YYYY-MM-DD) — para comparativo de periodo. */
   @IsString()
   @IsOptional()

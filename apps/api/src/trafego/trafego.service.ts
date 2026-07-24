@@ -3838,6 +3838,7 @@ export class TrafegoService {
       dateFrom?: string;
       dateTo?: string;
       channelType?: string;
+      campaignId?: string;
     },
   ) {
     const account = await this.getAccount(tenantId);
@@ -3943,6 +3944,12 @@ export class TrafegoService {
       };
     }
 
+    // Filtro opcional por campanha (id interno TrafficCampaign). Aplica-se aos
+    // KPIs e séries; pacing e contagem de campanhas seguem no nível da conta.
+    const campFilter = _opts.campaignId
+      ? { campaign_id: _opts.campaignId }
+      : {};
+
     // ─── Aggregations paralelas ──────────────────────────────────────────
     const [
       todayAgg,
@@ -3958,7 +3965,7 @@ export class TrafegoService {
     ] = await Promise.all([
       // Hoje
       this.prisma.trafficMetricDaily.aggregate({
-        where: { tenant_id: tenantId, date: today },
+        where: { tenant_id: tenantId, date: today, ...campFilter },
         _sum: {
           cost_micros: true,
           conversions: true,
@@ -3973,7 +3980,7 @@ export class TrafegoService {
       }),
       // 7 dias — sempre calculado pra mostrar "média 7d" ao lado do "leads hoje"
       this.prisma.trafficMetricDaily.aggregate({
-        where: { tenant_id: tenantId, date: { gte: sevenDaysAgo } },
+        where: { tenant_id: tenantId, date: { gte: sevenDaysAgo }, ...campFilter },
         _sum: {
           cost_micros: true,
           clicks: true,
@@ -3983,7 +3990,7 @@ export class TrafegoService {
       }),
       // 30 dias (ROAS) — janela fixa porque ROAS precisa de massa critica
       this.prisma.trafficMetricDaily.aggregate({
-        where: { tenant_id: tenantId, date: { gte: thirtyDaysAgo } },
+        where: { tenant_id: tenantId, date: { gte: thirtyDaysAgo }, ...campFilter },
         _sum: { cost_micros: true, conversions_value: true },
       }),
       // Período selecionado — KPIs principais (spend, cpl, ctr, cpc)
@@ -3991,6 +3998,7 @@ export class TrafegoService {
         where: {
           tenant_id: tenantId,
           date: { gte: rangeFrom, lte: rangeTo },
+          ...campFilter,
         },
         _sum: {
           cost_micros: true,
@@ -4005,6 +4013,7 @@ export class TrafegoService {
         where: {
           tenant_id: tenantId,
           date: { gte: compareFrom, lt: rangeFrom },
+          ...campFilter,
         },
         _sum: {
           cost_micros: true,
@@ -4020,6 +4029,7 @@ export class TrafegoService {
         where: {
           tenant_id: tenantId,
           date: { gte: rangeFrom, lte: rangeTo },
+          ...campFilter,
         },
         _sum: {
           cost_micros: true,
@@ -4037,7 +4047,7 @@ export class TrafegoService {
       // Timeseries 30d agrupado por dia (gasto + leads)
       this.prisma.trafficMetricDaily.groupBy({
         by: ['date'],
-        where: { tenant_id: tenantId, date: { gte: thirtyDaysAgo } },
+        where: { tenant_id: tenantId, date: { gte: thirtyDaysAgo }, ...campFilter },
         _sum: { cost_micros: true, conversions: true },
         orderBy: { date: 'asc' },
       }),
@@ -4048,6 +4058,7 @@ export class TrafegoService {
           tenant_id: tenantId,
           date: { gte: sevenDaysAgo },
           conversions: { gt: 0 },
+          ...campFilter,
         },
         _sum: {
           cost_micros: true,
