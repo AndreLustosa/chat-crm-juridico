@@ -1230,6 +1230,9 @@ export class TrafegoReadProcessor extends WorkerHost {
     const since = new Date();
     since.setUTCDate(since.getUTCDate() - days);
     const sinceStr = since.toISOString().slice(0, 10);
+    // O Google exige intervalo FECHADO em segments.date (início E fim), senão
+    // recusa com "Expects filters ... to limit a finite date range".
+    const toStr = new Date().toISOString().slice(0, 10);
     const regionInput = (params.region || '').trim();
 
     const zero = { clicks: 0, impressions: 0, conversions: 0, cost_brl: 0, cities: 0 };
@@ -1266,7 +1269,7 @@ export class TrafegoReadProcessor extends WorkerHost {
           metrics.conversions,
           metrics.cost_micros
         FROM geographic_view
-        WHERE segments.date >= '${sinceStr}'
+        WHERE segments.date BETWEEN '${sinceStr}' AND '${toStr}'
       `)) as any[];
       rows = raw.filter((r) => {
         const lt = r?.geographic_view?.location_type;
@@ -1283,7 +1286,7 @@ export class TrafegoReadProcessor extends WorkerHost {
             metrics.conversions,
             metrics.cost_micros
           FROM user_location_view
-          WHERE segments.date >= '${sinceStr}'
+          WHERE segments.date BETWEEN '${sinceStr}' AND '${toStr}'
         `)) as any[];
       } catch (eUser: any) {
         return {
