@@ -1235,27 +1235,67 @@ export class TrafegoReadProcessor extends WorkerHost {
     const zero = { clicks: 0, impressions: 0, conversions: 0, cost_brl: 0, cities: 0 };
 
     // 1) Métricas por cidade (localização física do usuário).
+    // Mensagem legível de erro do Google Ads (que chega como objeto, não string).
+    const gaqlErr = (e: any): string => {
+      try {
+        if (!e) return 'erro desconhecido';
+        if (Array.isArray(e.errors) && e.errors.length)
+          return e.errors.map((x: any) => x?.message || JSON.stringify(x)).join(' | ');
+        if (typeof e.message === 'string' && e.message) return e.message;
+        const s = JSON.stringify(e);
+        return s && s !== '{}' ? s.slice(0, 500) : String(e);
+      } catch {
+        return String(e);
+      }
+    };
+
+    // geographic_view.location_type NÃO é filtrável no WHERE (só selecionável) —
+    // por isso a versão anterior falhava. Selecionamos e filtramos
+    // LOCATION_OF_PRESENCE (=3) em código. Fallback: user_location_view (que já é
+    // localização física, sem AREA_OF_INTEREST).
     let rows: any[] = [];
+    let source = 'geographic_view';
+    const LOP = 3; // GeographicViewLocationType.LOCATION_OF_PRESENCE
     try {
-      rows = (await customer.query(`
+      const raw = (await customer.query(`
         SELECT
+          geographic_view.location_type,
           segments.geo_target_city,
           metrics.clicks,
           metrics.impressions,
           metrics.conversions,
           metrics.cost_micros
         FROM geographic_view
-        WHERE geographic_view.location_type = 'LOCATION_OF_PRESENCE'
-          AND segments.date >= '${sinceStr}'
+        WHERE segments.date >= '${sinceStr}'
       `)) as any[];
-    } catch (e: any) {
-      return {
-        municipios: [],
-        totals: { ...zero },
-        region: regionInput || null,
-        unresolved_clicks: 0,
-        note: `Falha na leitura geográfica (geographic_view): ${e?.message ?? e}`,
-      };
+      rows = raw.filter((r) => {
+        const lt = r?.geographic_view?.location_type;
+        return lt === LOP || lt === 'LOCATION_OF_PRESENCE';
+      });
+    } catch (eGeo: any) {
+      try {
+        source = 'user_location_view';
+        rows = (await customer.query(`
+          SELECT
+            segments.geo_target_city,
+            metrics.clicks,
+            metrics.impressions,
+            metrics.conversions,
+            metrics.cost_micros
+          FROM user_location_view
+          WHERE segments.date >= '${sinceStr}'
+        `)) as any[];
+      } catch (eUser: any) {
+        return {
+          municipios: [],
+          totals: { ...zero },
+          region: regionInput || null,
+          unresolved_clicks: 0,
+          note:
+            `Falha na leitura geográfica. geographic_view: ${gaqlErr(eGeo)} ` +
+            `|| user_location_view: ${gaqlErr(eUser)}`,
+        };
+      }
     }
 
     // 2) Agrega por constante de cidade. Linhas sem cidade (Google não
@@ -1285,7 +1325,7 @@ export class TrafegoReadProcessor extends WorkerHost {
         totals: { ...zero },
         region: regionInput || null,
         unresolved_clicks: unresolvedClicks,
-        note: 'Sem cidade determinada no período (conta pequena ou geo indisponível).',
+        note: `Sem cidade determinada no período (fonte: ${source}; ${rows.length} linhas, ${unresolvedClicks} cliques sem cidade).`,
       };
     }
 
