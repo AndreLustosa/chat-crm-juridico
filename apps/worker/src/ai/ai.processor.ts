@@ -702,6 +702,26 @@ export class AiProcessor extends WorkerHost implements OnModuleInit {
       // Nome salvo no banco (Lead.name) — Evolution API não tem endpoint para renomear contatos
     }
 
+    // a-bis. Cidade/UF declarada pelo lead → fonte PRIMÁRIA do "mapa de leads"
+    //   (Lead.address_city/address_state). A IA só envia quando o lead informa
+    //   explicitamente (é instruída a não inventar). Sobrepõe o valor anterior
+    //   porque a última cidade dita pelo próprio lead é a mais confiável.
+    {
+      const leadLoc: Record<string, any> = {};
+      if (typeof updates.city === 'string' && updates.city.trim().length >= 2) {
+        leadLoc.address_city = updates.city.trim().slice(0, 120);
+      }
+      if (typeof updates.state === 'string' && updates.state.trim().length >= 2) {
+        leadLoc.address_state = updates.state.trim().toUpperCase().slice(0, 2);
+      }
+      if (Object.keys(leadLoc).length) {
+        await this.prisma.lead.update({ where: { id: leadId }, data: leadLoc });
+        this.logger.log(
+          `[AI] Localização do lead ${leadId}: ${leadLoc.address_city ?? '—'}/${leadLoc.address_state ?? '—'}`,
+        );
+      }
+    }
+
     // b. Status → Lead.stage
     //
     // Bug fix 2026-05-21 (Andre reportou tarefas duplicadas): a IA processa

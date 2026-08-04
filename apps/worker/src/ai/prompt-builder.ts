@@ -501,11 +501,24 @@ export class PromptBuilder {
             },
             updates: {
               type: 'object',
-              description: 'Atualizações opcionais do lead. Preencha sempre que houver mudança de estágio ou informação nova coletada.',
+              description: 'Atualizações opcionais do lead. Preencha sempre que houver mudança de estágio ou informação nova coletada — incluindo a cidade (city/state) sempre que o lead disser de onde é.',
               properties: {
                 name: {
                   type: 'string',
                   description: 'Nome real do cliente quando informado',
+                },
+                city: {
+                  type: 'string',
+                  description:
+                    'Cidade onde o lead mora ou está, SOMENTE quando ele informar explicitamente ' +
+                    '(ex.: "sou de Arapiraca", "aqui em Maceió", "moro em Palmeira dos Índios"). ' +
+                    'NÃO invente nem deduza pelo DDD do telefone. Só o nome da cidade, sem a UF.',
+                },
+                state: {
+                  type: 'string',
+                  description:
+                    'UF (sigla de 2 letras, ex.: "AL") da cidade do lead — quando ele informar ou ' +
+                    'quando a cidade for inequívoca. Preencha junto com city; se tiver dúvida, omita.',
                 },
                 status: {
                   type: 'string',
