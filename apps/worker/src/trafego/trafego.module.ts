@@ -21,6 +21,7 @@ import { EnhancedConvUploadCron } from './enhanced-conv-upload.cron';
 import { EnhancedConvTriggerProcessor } from './enhanced-conv-trigger.processor';
 import { TrafegoReadProcessor } from './trafego-read.processor';
 import { QualityScoreSnapshotCron } from './quality-score-snapshot.cron';
+import { LeadGeoBackfillCron } from './lead-geo-backfill.cron';
 
 /**
  * Worker do modulo de Trafego.
@@ -73,6 +74,7 @@ import { QualityScoreSnapshotCron } from './quality-score-snapshot.cron';
     EnhancedConvTriggerProcessor,
     TrafegoReadProcessor,
     QualityScoreSnapshotCron,
+    LeadGeoBackfillCron,
   ],
   exports: [
     TrafficOCIService,

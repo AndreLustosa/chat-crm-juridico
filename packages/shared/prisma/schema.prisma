@@ -308,6 +308,18 @@ model Lead {
   google_wbraid   String?
   /// Quando o clique aconteceu (= criacao do lead se gclid presente)
   google_click_at DateTime?
+
+  // ─── Cidade INFERIDA (localizacao fisica do clique) ──────────────────────
+  /// Cidade/UF inferida do click_view.location_of_presence do gclid deste lead,
+  /// preenchida pelo LeadGeoBackfillCron quando NAO ha cidade declarada
+  /// (address_city). Fonte SECUNDARIA (fallback) do mapa de leads.
+  /// NUNCA usar em documentos/endereco (isso e address_city, declarado) — a
+  /// inferida e uma estimativa do Google, so pra visao geografica agregada.
+  inferred_city   String?
+  inferred_state  String?
+  /// Quando a inferencia foi feita (pra saber a frescura / re-tentar).
+  inferred_geo_at DateTime?
+
   // UTM tags
   utm_source      String?
   utm_medium      String?
