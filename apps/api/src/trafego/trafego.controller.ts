@@ -1678,6 +1678,16 @@ export class TrafegoController {
   }
 
   /**
+   * Leads por município (cidade declarada ∨ inferida) — mapa de leads por lead.
+   * Agregação local no banco (sem GAQL). Base primária do mapa da Fase 3.
+   */
+  @Get('leads-geo')
+  @Roles('ADMIN', 'ADVOGADO')
+  async leadsGeo(@Req() req: any) {
+    return await this.service.getLeadsGeo(req.user.tenant_id);
+  }
+
+  /**
    * BUG-F treatment (2026-05-18) — diagnose Enhanced Conversions for Leads.
    *
    * Combina:

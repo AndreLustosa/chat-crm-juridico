@@ -281,6 +281,71 @@ export class TrafegoService {
     });
   }
 
+  /**
+   * Agrega os LEADS por município — fonte primária do "mapa de leads" por lead
+   * (Fase 3). Cidade DECLARADA (Lead.address_city) tem prioridade; quando ausente,
+   * usa a INFERIDA do clique (Lead.inferred_city). Retorna os grupos crus — o
+   * front casa os nomes com os municípios de Alagoas — + totais de cobertura
+   * (declarado / inferido / sem cidade).
+   */
+  async getLeadsGeo(tenantId: string): Promise<{
+    declared: Array<{ city: string; state: string | null; count: number }>;
+    inferred: Array<{ city: string; state: string | null; count: number }>;
+    totals: {
+      total_leads: number;
+      with_city: number;
+      declared: number;
+      inferred: number;
+      no_city: number;
+    };
+  }> {
+    const [declaredGroups, inferredGroups, totalLeads] = await Promise.all([
+      this.prisma.lead.groupBy({
+        by: ['address_city', 'address_state'],
+        where: { tenant_id: tenantId, address_city: { not: null } },
+        _count: { _all: true },
+      }),
+      // Inferida só conta quando NÃO há declarada (declarada sempre vence).
+      this.prisma.lead.groupBy({
+        by: ['inferred_city', 'inferred_state'],
+        where: {
+          tenant_id: tenantId,
+          address_city: null,
+          inferred_city: { not: null },
+        },
+        _count: { _all: true },
+      }),
+      this.prisma.lead.count({ where: { tenant_id: tenantId } }),
+    ]);
+
+    const declared = declaredGroups.map((g) => ({
+      city: g.address_city as string,
+      state: g.address_state ?? null,
+      count: g._count._all,
+    }));
+    const inferred = inferredGroups.map((g) => ({
+      city: g.inferred_city as string,
+      state: g.inferred_state ?? null,
+      count: g._count._all,
+    }));
+
+    const declaredTotal = declared.reduce((s, x) => s + x.count, 0);
+    const inferredTotal = inferred.reduce((s, x) => s + x.count, 0);
+    const withCity = declaredTotal + inferredTotal;
+
+    return {
+      declared,
+      inferred,
+      totals: {
+        total_leads: totalLeads,
+        with_city: withCity,
+        declared: declaredTotal,
+        inferred: inferredTotal,
+        no_city: Math.max(0, totalLeads - withCity),
+      },
+    };
+  }
+
   // ─── P3: Ad Schedule ───────────────────────────────────────────────────
 
   /**
